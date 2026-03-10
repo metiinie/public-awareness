@@ -15,7 +15,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Profile retrieved successfully.' })
   getProfile(@Request() req) {
-    return this.authService.getProfile(req.user.userId);
+    try {
+      return this.authService.getProfile(req.user.userId);
+    } catch (error) {
+      console.error('Error fetching profile for user:', req.user.userId, error);
+      throw error;
+    }
   }
 
   @Post('register')
@@ -42,6 +47,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Update user profile' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully.' })
   updateProfile(@Request() req, @Body() updateProfileDto: UpdateProfileDto) {
-    return this.authService.updateProfile(req.user.userId, updateProfileDto);
+    try {
+      return this.authService.updateProfile(req.user.userId, updateProfileDto);
+    } catch (error) {
+      console.error('Error updating profile for user:', req.user.userId, error);
+      throw error;
+    }
   }
 }

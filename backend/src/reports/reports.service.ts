@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { reports, media, reactions, users } from '../db/schema';
-import { eq, and, desc, sql, SQL } from 'drizzle-orm';
+import { reports, media, reactions, users, categories, areas, cities } from '../db/schema';
+import { eq, and, desc, sql, SQL, lte, ne } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -14,6 +14,7 @@ export class ReportsService {
 
   async create(createReportDto: CreateReportDto, userId: number) {
     const { mediaUrls, ...reportData } = createReportDto;
+    console.log(`[ReportsService] Creating report for user ${userId}`, { categoryId: reportData.categoryId, mediaCount: mediaUrls?.length });
 
     // --- Evidence Rule ---
     if (!mediaUrls || mediaUrls.length === 0) {
@@ -21,98 +22,105 @@ export class ReportsService {
     }
 
     // --- Auto Archiving Logic ---
-    // Example: Traffic -> 6h, Power -> 24h, Water -> 24h
-    // Assuming category IDs 1=Traffic, 2=Power, 3=Water, 4=Security, 5=Other
     let archiveHours = 24;
     if (createReportDto.categoryId === 1) archiveHours = 6;
 
     const autoArchiveAt = new Date();
     autoArchiveAt.setHours(autoArchiveAt.getHours() + archiveHours);
 
-    // Create report
-    const [newReport] = await this.db.insert(reports).values({
-      ...reportData,
-      reporterId: userId,
-      status: 'PENDING',
-      trustScore: 50, // Initial confidence score
-      autoArchiveAt: autoArchiveAt,
-    }).returning();
+    try {
+      // 1. Insert report
+      const [newReport] = await this.db.insert(reports).values({
+        ...reportData,
+        reporterId: userId,
+        status: 'PENDING',
+        trustScore: 50,
+        autoArchiveAt: autoArchiveAt,
+      }).returning();
 
-    // Insert media
-    if (mediaUrls && mediaUrls.length > 0) {
-      await this.db.insert(media).values(
-        mediaUrls.map((url) => {
+      console.log(`[ReportsService] Inserted report ID: ${newReport.id}`);
+
+      // 2. Insert media
+      if (mediaUrls && mediaUrls.length > 0) {
+        const mediaRecords = mediaUrls.map((url) => {
           const isVideo = url.toLowerCase().match(/\.(mp4|mov|avi|wmv)$/) || url.includes('video');
           return {
             reportId: newReport.id,
             url,
             type: isVideo ? 'VIDEO' : 'IMAGE',
           };
-        }),
-      );
-    }
+        });
+        await this.db.insert(media).values(mediaRecords);
+        console.log(`[ReportsService] Attached ${mediaRecords.length} media records`);
+      }
 
-    // --- Notification Trigger ---
-    const fullReport = await this.findOne(newReport.id);
-    try {
-      await this.notificationsService.handleNewReport(fullReport);
-    } catch (e) {
-      console.error('Notification trigger failed', e);
-    }
+      // 3. Trigger Notifications
+      const fullReport = await this.findOne(newReport.id);
+      try {
+        await this.notificationsService.handleNewReport(fullReport);
+      } catch (e) {
+        console.error('[ReportsService] Notification trigger failed', e);
+      }
 
-    return fullReport;
+      return fullReport;
+    } catch (error) {
+      console.error('[ReportsService] Create operation failed:', error);
+      throw error;
+    }
   }
 
   async findAll(filters: FilterReportDto) {
-    const conditions: SQL[] = [];
+    const { categoryId, cityId, areaId, status, reporterId, sortBy = 'createdAt', order = 'desc' } = filters;
 
+    let query = this.db.select({
+      id: reports.id,
+      title: reports.title,
+      description: reports.description,
+      status: reports.status,
+      trustScore: reports.trustScore,
+      createdAt: reports.createdAt,
+      autoArchiveAt: reports.autoArchiveAt,
+      category: { name: categories.name },
+      city: { name: cities.name },
+      area: { name: areas.name },
+      reporter: {
+        id: users.id,
+        fullName: users.fullName,
+        trustScore: users.trustScore,
+      }
+    })
+    .from(reports)
+    .leftJoin(categories, eq(reports.categoryId, categories.id))
+    .leftJoin(cities, eq(reports.cityId, cities.id))
+    .leftJoin(areas, eq(reports.areaId, areas.id))
+    .leftJoin(users, eq(reports.reporterId, users.id));
+
+    const whereClauses: any[] = [];
+    
     // Default filter: Only show PENDING/VERIFIED and non-expired if not searching for something specific
-    if (!filters.status && !filters.reporterId) {
-      conditions.push(sql`${reports.status} IN ('PENDING', 'VERIFIED')`);
-      conditions.push(sql`${reports.autoArchiveAt} > NOW()`);
+    if (!status && !reporterId) {
+      whereClauses.push(sql`${reports.status} IN ('PENDING', 'VERIFIED')`);
+      whereClauses.push(sql`${reports.autoArchiveAt} > NOW()`);
     }
 
-    if (filters.categoryId) conditions.push(eq(reports.categoryId, filters.categoryId));
-    if (filters.cityId) conditions.push(eq(reports.cityId, filters.cityId));
-    if (filters.areaId) conditions.push(eq(reports.areaId, filters.areaId));
-    if (filters.status) conditions.push(eq(reports.status, filters.status as any));
-    if (filters.reporterId) conditions.push(eq(reports.reporterId, filters.reporterId));
+    if (categoryId) whereClauses.push(eq(reports.categoryId, categoryId));
+    if (cityId) whereClauses.push(eq(reports.cityId, cityId));
+    if (areaId) whereClauses.push(eq(reports.areaId, areaId));
+    if (status) whereClauses.push(eq(reports.status, status as any));
+    if (reporterId) whereClauses.push(eq(reports.reporterId, reporterId));
 
-    return this.db.query.reports.findMany({
-      where: and(...conditions),
-      with: {
-        media: true,
-        category: true,
-        city: true,
-        area: true,
-        reporter: {
-          columns: {
-            id: true,
-            fullName: true,
-            trustScore: true,
-          },
-        },
-        comments: {
-          columns: {
-            id: true
-          }
-        },
-        reactions: {
-          columns: {
-            type: true
-          }
-        },
-      },
-      // --- Feed Ranking Logic ---
-      // 1. Confidence score (trustScore field) DESC
-      // 2. Recency (createdAt field) DESC
-      orderBy: [desc(reports.trustScore), desc(reports.createdAt)],
-    }).then(results => results.map(r => ({
-      ...r,
-      commentCount: r.comments.length,
-      votesReal: r.reactions.filter(re => re.type === 'REAL').length,
-      votesFake: r.reactions.filter(re => re.type === 'FAKE').length,
-    })));
+    if (whereClauses.length > 0) {
+      query = query.where(and(...whereClauses));
+    }
+
+    if (sortBy === 'trustScore') {
+      query = query.orderBy(order === 'desc' ? desc(reports.trustScore) : reports.trustScore);
+    } else {
+      query = query.orderBy(order === 'desc' ? desc(reports.createdAt) : reports.createdAt);
+    }
+
+    const results = await query;
+    return results;
   }
 
   async findVotingHistory(userId: number) {
@@ -152,33 +160,39 @@ export class ReportsService {
   }
 
   async findOne(id: number) {
-    const report = await this.db.query.reports.findFirst({
-      where: eq(reports.id, id),
-      with: {
-        media: true,
-        category: true,
-        city: true,
-        area: true,
-        reporter: true,
-        reactions: true,
-        comments: {
-          with: {
-            user: {
-              columns: {
-                id: true,
-                fullName: true,
-                trustScore: true
-              }
-            }
-          }
-        }
-      },
-    });
+    const [report] = await this.db.select({
+      id: reports.id,
+      title: reports.title,
+      description: reports.description,
+      status: reports.status,
+      trustScore: reports.trustScore,
+      createdAt: reports.createdAt,
+      autoArchiveAt: reports.autoArchiveAt,
+      reporterId: reports.reporterId,
+      category: { name: categories.name },
+      city: { name: cities.name },
+      area: { name: areas.name },
+      reporter: {
+        id: users.id,
+        fullName: users.fullName,
+        trustScore: users.trustScore,
+      }
+    })
+    .from(reports)
+    .leftJoin(categories, eq(reports.categoryId, categories.id))
+    .leftJoin(cities, eq(reports.cityId, cities.id))
+    .leftJoin(areas, eq(reports.areaId, areas.id))
+    .leftJoin(users, eq(reports.reporterId, users.id))
+    .where(eq(reports.id, id))
+    .limit(1);
 
     if (!report) throw new NotFoundException('Report not found');
 
-    const totalVotes = report.reactions.length;
-    const realVotes = report.reactions.filter(r => r.type === 'REAL').length;
+    const mediaItems = await this.db.select().from(media).where(eq(media.reportId, id));
+    const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, id));
+
+    const totalVotes = votes.length;
+    const realVotes = votes.filter(r => r.type === 'REAL').length;
     const voteRatio = totalVotes > 0 ? (realVotes / totalVotes) * 100 : 100;
 
     // Age Decay
@@ -186,12 +200,13 @@ export class ReportsService {
     const createdAt = new Date(report.createdAt);
     const autoArchiveAt = new Date(report.autoArchiveAt);
     const totalLifeSpan = autoArchiveAt.getTime() - createdAt.getTime();
-    const ageElapsed = now.getTime() - createdAt.getTime();
+    const ageElapsed = Math.max(0, now.getTime() - createdAt.getTime());
     const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan)) * 100;
 
     return {
       ...report,
-      commentCount: report.comments.length,
+      media: mediaItems,
+      commentCount: 0, // Simplified for now
       votesReal: realVotes,
       votesFake: totalVotes - realVotes,
       breakdown: {
@@ -292,8 +307,8 @@ export class ReportsService {
       .set({ status: 'ARCHIVED' })
       .where(
         and(
-          sql`${reports.autoArchiveAt} <= ${now}`,
-          sql`${reports.status} != 'ARCHIVED'`
+          lte(reports.autoArchiveAt, now),
+          ne(reports.status, 'ARCHIVED')
         )
       )
       .returning();

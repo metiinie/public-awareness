@@ -59,4 +59,14 @@ export class FilterReportDto {
   @Type(() => Number)
   @IsInt()
   reporterId?: number;
+
+  @ApiPropertyOptional({ example: 'createdAt' })
+  @IsOptional()
+  @IsString()
+  sortBy?: string;
+
+  @ApiPropertyOptional({ example: 'desc' })
+  @IsOptional()
+  @IsString()
+  order?: string;
 }

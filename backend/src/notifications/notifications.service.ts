@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { notifications, subscriptions, users } from '../db/schema';
-import { eq, and, or, sql, isNull } from 'drizzle-orm';
+import { notifications, subscriptions, users, reports, areas, cities } from '../db/schema';
+import { eq, and, or, sql, isNull, desc } from 'drizzle-orm';
 
 @Injectable()
 export class NotificationsService {
@@ -40,18 +40,27 @@ export class NotificationsService {
     }
 
     async findAllForUser(userId: number) {
-        return this.db.query.notifications.findMany({
-            where: eq(notifications.userId, userId),
-            with: {
-                report: {
-                    with: {
-                        category: true,
-                        area: true,
-                    }
-                },
-            },
-            orderBy: [sql`${notifications.createdAt} DESC`],
-        });
+        return this.db.select({
+            id: notifications.id,
+            userId: notifications.userId,
+            reportId: notifications.reportId,
+            type: notifications.type,
+            message: notifications.message,
+            isRead: notifications.isRead,
+            createdAt: notifications.createdAt,
+            report: {
+                id: reports.id,
+                trustScore: reports.trustScore,
+                area: { name: areas.name },
+                city: { name: cities.name },
+            }
+        })
+        .from(notifications)
+        .leftJoin(reports, eq(notifications.reportId, reports.id))
+        .leftJoin(areas, eq(reports.areaId, areas.id))
+        .leftJoin(cities, eq(reports.cityId, cities.id))
+        .where(eq(notifications.userId, userId))
+        .orderBy(desc(notifications.createdAt));
     }
 
     async markAsRead(id: number, userId: number) {

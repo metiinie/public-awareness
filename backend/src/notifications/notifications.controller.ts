@@ -13,7 +13,12 @@ export class NotificationsController {
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Get all notifications for the current user' })
     findAll(@Request() req) {
-        return this.notificationsService.findAllForUser(req.user.userId);
+        try {
+            return this.notificationsService.findAllForUser(req.user.userId);
+        } catch (error) {
+            console.error('Error fetching notifications for user:', req.user.userId, error);
+            throw error;
+        }
     }
 
     @Patch(':id/read')
@@ -21,6 +26,11 @@ export class NotificationsController {
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Mark a notification as read' })
     markAsRead(@Param('id') id: string, @Request() req) {
-        return this.notificationsService.markAsRead(+id, req.user.userId);
+        try {
+            return this.notificationsService.markAsRead(+id, req.user.userId);
+        } catch (error) {
+            console.error('Error marking notification as read:', id, error);
+            throw error;
+        }
     }
 }

@@ -14,12 +14,21 @@ export class AuthService {
   ) { }
 
   async getProfile(userId: number) {
-    const user = await this.db.query.users.findFirst({
-      where: eq(users.id, userId),
-    });
+    const [user] = await this.db.select({
+      id: users.id,
+      email: users.email,
+      fullName: users.fullName,
+      role: users.role,
+      trustScore: users.trustScore,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
 
     if (!user) {
-      throw new UnauthorizedException();
+      console.error(`[AuthService] Profile lookup failed: User ${userId} not found in DB`);
+      throw new UnauthorizedException('User not found');
     }
 
     const [reportStats] = await this.db.select({
