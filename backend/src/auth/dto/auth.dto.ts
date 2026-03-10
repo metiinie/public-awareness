@@ -25,3 +25,11 @@ export class LoginDto {
   @IsNotEmpty()
   password: string;
 }
+
+export class UpdateProfileDto {
+  @ApiProperty({ example: 'John Doe', required: false })
+  fullName?: string;
+
+  @ApiProperty({ example: 'https://avatar.url', required: false })
+  avatar?: string;
+}

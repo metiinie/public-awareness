@@ -7,7 +7,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @ApiTags('reports')
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(private readonly reportsService: ReportsService) { }
 
   @Post()
   @UseGuards(JwtAuthGuard)
@@ -23,6 +23,22 @@ export class ReportsController {
     return this.reportsService.findAll(filters);
   }
 
+  @Get('user/me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user reports' })
+  getMyReports(@Request() req) {
+    return this.reportsService.findAll({ reporterId: req.user.userId });
+  }
+
+  @Get('user/votes')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user voting history' })
+  getMyVotes(@Request() req) {
+    return this.reportsService.findVotingHistory(req.user.userId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get a single report by ID' })
   findOne(@Param('id') id: string) {
@@ -32,8 +48,8 @@ export class ReportsController {
   @Post(':id/vote')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Upvote or downvote a report' })
-  vote(@Param('id') id: string, @Body('type') type: 'UPVOTE' | 'DOWNVOTE', @Request() req) {
+  @ApiOperation({ summary: 'Vote REAL or FAKE on a report' })
+  vote(@Param('id') id: string, @Body('type') type: 'REAL' | 'FAKE', @Request() req) {
     return this.reportsService.vote(+id, req.user.userId, type);
   }
 }

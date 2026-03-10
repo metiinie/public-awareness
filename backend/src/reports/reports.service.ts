@@ -3,10 +3,14 @@ import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { reports, media, reactions, users } from '../db/schema';
 import { eq, and, desc, sql, SQL } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ReportsService {
-  constructor(@Inject(DRIZZLE_PROVIDER) private db: any) { }
+  constructor(
+    @Inject(DRIZZLE_PROVIDER) private db: any,
+    private readonly notificationsService: NotificationsService,
+  ) { }
 
   async create(createReportDto: CreateReportDto, userId: number) {
     const { mediaUrls, ...reportData } = createReportDto;
@@ -35,28 +39,44 @@ export class ReportsService {
     }).returning();
 
     // Insert media
-    await this.db.insert(media).values(
-      mediaUrls.map((url) => ({
-        reportId: newReport.id,
-        url,
-        type: 'IMAGE',
-      })),
-    );
+    if (mediaUrls && mediaUrls.length > 0) {
+      await this.db.insert(media).values(
+        mediaUrls.map((url) => {
+          const isVideo = url.toLowerCase().match(/\.(mp4|mov|avi|wmv)$/) || url.includes('video');
+          return {
+            reportId: newReport.id,
+            url,
+            type: isVideo ? 'VIDEO' : 'IMAGE',
+          };
+        }),
+      );
+    }
 
-    return newReport;
+    // --- Notification Trigger ---
+    const fullReport = await this.findOne(newReport.id);
+    try {
+      await this.notificationsService.handleNewReport(fullReport);
+    } catch (e) {
+      console.error('Notification trigger failed', e);
+    }
+
+    return fullReport;
   }
 
   async findAll(filters: FilterReportDto) {
-    const conditions: SQL[] = [
-      // Only show PENDING or VERIFIED reports that haven't expired
-      sql`${reports.status} IN ('PENDING', 'VERIFIED')`,
-      sql`${reports.autoArchiveAt} > NOW()`,
-    ];
+    const conditions: SQL[] = [];
+
+    // Default filter: Only show PENDING/VERIFIED and non-expired if not searching for something specific
+    if (!filters.status && !filters.reporterId) {
+      conditions.push(sql`${reports.status} IN ('PENDING', 'VERIFIED')`);
+      conditions.push(sql`${reports.autoArchiveAt} > NOW()`);
+    }
 
     if (filters.categoryId) conditions.push(eq(reports.categoryId, filters.categoryId));
     if (filters.cityId) conditions.push(eq(reports.cityId, filters.cityId));
     if (filters.areaId) conditions.push(eq(reports.areaId, filters.areaId));
     if (filters.status) conditions.push(eq(reports.status, filters.status as any));
+    if (filters.reporterId) conditions.push(eq(reports.reporterId, filters.reporterId));
 
     return this.db.query.reports.findMany({
       where: and(...conditions),
@@ -72,12 +92,63 @@ export class ReportsService {
             trustScore: true,
           },
         },
+        comments: {
+          columns: {
+            id: true
+          }
+        },
+        reactions: {
+          columns: {
+            type: true
+          }
+        },
       },
       // --- Feed Ranking Logic ---
       // 1. Confidence score (trustScore field) DESC
       // 2. Recency (createdAt field) DESC
       orderBy: [desc(reports.trustScore), desc(reports.createdAt)],
-    });
+    }).then(results => results.map(r => ({
+      ...r,
+      commentCount: r.comments.length,
+      votesReal: r.reactions.filter(re => re.type === 'REAL').length,
+      votesFake: r.reactions.filter(re => re.type === 'FAKE').length,
+    })));
+  }
+
+  async findVotingHistory(userId: number) {
+    return this.db.query.reactions.findMany({
+      where: eq(reactions.userId, userId),
+      with: {
+        report: {
+          with: {
+            media: true,
+            category: true,
+            city: true,
+            area: true,
+            reporter: {
+              columns: {
+                id: true,
+                fullName: true,
+                trustScore: true,
+              }
+            },
+            reactions: true,
+            comments: {
+              columns: {
+                id: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: [desc(reactions.id)],
+    }).then(results => results.map(re => ({
+      ...re.report,
+      userVote: re.type,
+      commentCount: re.report.comments.length,
+      votesReal: re.report.reactions.filter(r => r.type === 'REAL').length,
+      votesFake: re.report.reactions.filter(r => r.type === 'FAKE').length,
+    })));
   }
 
   async findOne(id: number) {
@@ -90,11 +161,45 @@ export class ReportsService {
         area: true,
         reporter: true,
         reactions: true,
+        comments: {
+          with: {
+            user: {
+              columns: {
+                id: true,
+                fullName: true,
+                trustScore: true
+              }
+            }
+          }
+        }
       },
     });
 
     if (!report) throw new NotFoundException('Report not found');
-    return report;
+
+    const totalVotes = report.reactions.length;
+    const realVotes = report.reactions.filter(r => r.type === 'REAL').length;
+    const voteRatio = totalVotes > 0 ? (realVotes / totalVotes) * 100 : 100;
+
+    // Age Decay
+    const now = new Date();
+    const createdAt = new Date(report.createdAt);
+    const autoArchiveAt = new Date(report.autoArchiveAt);
+    const totalLifeSpan = autoArchiveAt.getTime() - createdAt.getTime();
+    const ageElapsed = now.getTime() - createdAt.getTime();
+    const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan)) * 100;
+
+    return {
+      ...report,
+      commentCount: report.comments.length,
+      votesReal: realVotes,
+      votesFake: totalVotes - realVotes,
+      breakdown: {
+        voteRatio: Math.round(voteRatio),
+        reporterTrust: report.reporter?.trustScore || 50,
+        ageDecay: Math.max(0, Math.round(ageDecay)),
+      }
+    };
   }
 
   async vote(reportId: number, userId: number, type: 'REAL' | 'FAKE') {
@@ -179,6 +284,21 @@ export class ReportsService {
         await this.db.update(reports).set({ status: 'ARCHIVED' }).where(eq(reports.id, reportId));
       }
     }
+  }
+
+  async archiveExpired() {
+    const now = new Date();
+    const result = await this.db.update(reports)
+      .set({ status: 'ARCHIVED' })
+      .where(
+        and(
+          sql`${reports.autoArchiveAt} <= ${now}`,
+          sql`${reports.status} != 'ARCHIVED'`
+        )
+      )
+      .returning();
+
+    return result.length;
   }
 }
 

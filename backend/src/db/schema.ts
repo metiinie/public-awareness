@@ -85,10 +85,40 @@ export const subscriptions = pgTable('subscriptions', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// --- Comments ---
+export const comments = pgTable('comments', {
+  id: serial('id').primaryKey(),
+  reportId: integer('report_id').references(() => reports.id).notNull(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    reportIdx: index('comment_report_idx').on(table.reportId),
+  };
+});
+
+// --- Notifications ---
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  reportId: integer('report_id').references(() => reports.id),
+  type: varchar('type', { length: 50 }).notNull(), // 'NEW_REPORT' | 'STATUS_CHANGE'
+  message: text('message').notNull(),
+  isRead: boolean('is_read').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    userReadIdx: index('notif_user_read_idx').on(table.userId, table.isRead),
+  };
+});
+
 // --- Relations ---
 export const usersRelations = relations(users, ({ many }) => ({
   reports: many(reports),
   subscriptions: many(subscriptions),
+  comments: many(comments),
+  notifications: many(notifications),
 }));
 
 export const reportsRelations = relations(reports, ({ one, many }) => ({
@@ -98,6 +128,8 @@ export const reportsRelations = relations(reports, ({ one, many }) => ({
   area: one(areas, { fields: [reports.areaId], references: [areas.id] }),
   media: many(media),
   reactions: many(reactions),
+  comments: many(comments),
+  notifications: many(notifications),
 }));
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
@@ -129,4 +161,14 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   user: one(users, { fields: [subscriptions.userId], references: [users.id] }),
   area: one(areas, { fields: [subscriptions.areaId], references: [areas.id] }),
   category: one(categories, { fields: [subscriptions.categoryId], references: [categories.id] }),
+}));
+
+export const commentsRelations = relations(comments, ({ one }) => ({
+  report: one(reports, { fields: [comments.reportId], references: [reports.id] }),
+  user: one(users, { fields: [comments.userId], references: [users.id] }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, { fields: [notifications.userId], references: [users.id] }),
+  report: one(reports, { fields: [notifications.reportId], references: [reports.id] }),
 }));

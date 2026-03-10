@@ -1,20 +1,45 @@
 import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { users } from '../db/schema';
-import { LoginDto, RegisterDto } from './dto/auth.dto';
+import { users, reports, reactions } from '../db/schema';
+import { LoginDto, RegisterDto, UpdateProfileDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(DRIZZLE_PROVIDER) private db: any,
     private jwtService: JwtService,
-  ) {}
+  ) { }
+
+  async getProfile(userId: number) {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId),
+    });
+
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    const [reportStats] = await this.db.select({
+      count: sql`count(*)`
+    }).from(reports).where(eq(reports.reporterId, userId));
+
+    const [voteStats] = await this.db.select({
+      count: sql`count(*)`
+    }).from(reactions).where(eq(reactions.userId, userId));
+
+    return {
+      ...user,
+      reportsSubmitted: Number(reportStats?.count || 0),
+      votesCast: Number(voteStats?.count || 0),
+    };
+  }
 
   async register(registerDto: RegisterDto) {
-    const { email, password, fullName } = registerDto;
+    const email = registerDto.email.toLowerCase().trim();
+    const { password, fullName } = registerDto;
 
     // Check if user exists
     const [existingUser] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
@@ -34,7 +59,8 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
-    const { email, password } = loginDto;
+    const email = loginDto.email.toLowerCase().trim();
+    const { password } = loginDto;
 
     const [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user) {
@@ -47,6 +73,15 @@ export class AuthService {
     }
 
     return this.generateToken(user);
+  }
+
+  async updateProfile(userId: number, updateDto: UpdateProfileDto) {
+    const [updatedUser] = await this.db.update(users)
+      .set(updateDto)
+      .where(eq(users.id, userId))
+      .returning();
+
+    return updatedUser;
   }
 
   private generateToken(user: any) {

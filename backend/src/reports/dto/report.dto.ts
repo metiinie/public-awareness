@@ -1,5 +1,6 @@
 import { IsString, IsNotEmpty, IsInt, IsOptional, IsArray } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 export class CreateReportDto {
   @ApiProperty({ example: 'Pothole on Main St' })
@@ -32,16 +33,19 @@ export class CreateReportDto {
 export class FilterReportDto {
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   categoryId?: number;
 
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   cityId?: number;
 
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   areaId?: number;
 
@@ -49,4 +53,10 @@ export class FilterReportDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  reporterId?: number;
 }
