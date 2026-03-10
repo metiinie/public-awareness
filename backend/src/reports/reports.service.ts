@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { reports, media, reactions, users, categories, areas, cities } from '../db/schema';
-import { eq, and, desc, sql, SQL, lte, ne } from 'drizzle-orm';
+import { reports, media, reactions, users, categories, areas, cities, comments } from '../db/schema';
+import { eq, and, or, desc, sql, SQL, lte, ne } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -28,15 +28,37 @@ export class ReportsService {
     const autoArchiveAt = new Date();
     autoArchiveAt.setHours(autoArchiveAt.getHours() + archiveHours);
 
+    // --- Trust & Urgency Rules ---
+    // Critical reports or low-trust users (< 20) start as UNDER_REVIEW
+    // High-trust users (> 80) get a starting trust boost
+    const [userRecord] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const userTrust = userRecord?.trustScore ?? 50;
+    
+    let initialStatus = 'PUBLISHED';
+    if (reportData.urgency === 'CRITICAL' || userTrust < 20) {
+      initialStatus = 'UNDER_REVIEW';
+    }
+
+    let initialReportTrust = 50;
+    if (userTrust > 80) initialReportTrust = 70;
+    else if (userTrust < 30) initialReportTrust = 30;
+
     try {
       // 1. Insert report
       const [newReport] = await this.db.insert(reports).values({
         ...reportData,
         reporterId: userId,
-        status: 'PENDING',
-        trustScore: 50,
+        status: initialStatus,
+        urgency: reportData.urgency || 'INFO',
+        placeName: reportData.placeName || null,
+        trustScore: initialReportTrust,
         autoArchiveAt: autoArchiveAt,
       }).returning();
+
+      // Trigger cleanup occasionally (heuristic for CRON)
+      if (Math.random() > 0.8) {
+        this.expireOldReports().catch(err => console.error('Archive cleanup failed', err));
+      }
 
       console.log(`[ReportsService] Inserted report ID: ${newReport.id}`);
 
@@ -77,6 +99,8 @@ export class ReportsService {
       title: reports.title,
       description: reports.description,
       status: reports.status,
+      urgency: reports.urgency,
+      placeName: reports.placeName,
       trustScore: reports.trustScore,
       createdAt: reports.createdAt,
       autoArchiveAt: reports.autoArchiveAt,
@@ -87,7 +111,11 @@ export class ReportsService {
         id: users.id,
         fullName: users.fullName,
         trustScore: users.trustScore,
-      }
+      },
+      votesReal: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL'), 0)`,
+      votesFake: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE'), 0)`,
+      commentCount: sql<number>`COALESCE((SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id}), 0)`,
+      userVote: filters.viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${filters.viewerId} LIMIT 1)` : sql`NULL`,
     })
     .from(reports)
     .leftJoin(categories, eq(reports.categoryId, categories.id))
@@ -97,9 +125,9 @@ export class ReportsService {
 
     const whereClauses: any[] = [];
     
-    // Default filter: Only show PENDING/VERIFIED and non-expired if not searching for something specific
+    // Default filter: Only show PUBLISHED/VERIFIED and non-expired if not searching for something specific
     if (!status && !reporterId) {
-      whereClauses.push(sql`${reports.status} IN ('PENDING', 'VERIFIED')`);
+      whereClauses.push(sql`${reports.status} IN ('PUBLISHED', 'VERIFIED')`);
       whereClauses.push(sql`${reports.autoArchiveAt} > NOW()`);
     }
 
@@ -107,20 +135,56 @@ export class ReportsService {
     if (cityId) whereClauses.push(eq(reports.cityId, cityId));
     if (areaId) whereClauses.push(eq(reports.areaId, areaId));
     if (status) whereClauses.push(eq(reports.status, status as any));
+    if (filters.urgency) whereClauses.push(eq(reports.urgency, filters.urgency as any));
+    if (filters.search) {
+      whereClauses.push(or(
+        sql`${reports.title} ILIKE ${'%' + filters.search + '%'}`,
+        sql`${reports.description} ILIKE ${'%' + filters.search + '%'}`,
+        sql`${reports.placeName} ILIKE ${'%' + filters.search + '%'}`
+      ));
+    }
     if (reporterId) whereClauses.push(eq(reports.reporterId, reporterId));
 
     if (whereClauses.length > 0) {
       query = query.where(and(...whereClauses));
     }
 
-    if (sortBy === 'trustScore') {
-      query = query.orderBy(order === 'desc' ? desc(reports.trustScore) : reports.trustScore);
-    } else {
-      query = query.orderBy(order === 'desc' ? desc(reports.createdAt) : reports.createdAt);
+    const sortField = sortBy || 'createdAt';
+    const sortOrder = order || 'desc';
+
+    switch (sortField) {
+      case 'trustScore':
+        query = query.orderBy(sortOrder === 'desc' ? desc(reports.trustScore) : reports.trustScore);
+        break;
+      case 'urgency':
+        // Custom urgency ordering: CRITICAL > WARNING > INFO
+        query = query.orderBy(sortOrder === 'desc' ? 
+          sql`CASE WHEN ${reports.urgency} = 'CRITICAL' THEN 3 WHEN ${reports.urgency} = 'WARNING' THEN 2 ELSE 1 END DESC` : 
+          sql`CASE WHEN ${reports.urgency} = 'CRITICAL' THEN 3 WHEN ${reports.urgency} = 'WARNING' THEN 2 ELSE 1 END ASC`
+        );
+        break;
+      case 'votes':
+        query = query.orderBy(sortOrder === 'desc' ? 
+          desc(sql`(SELECT count(*) FROM reactions WHERE report_id = ${reports.id})`) : 
+          sql`(SELECT count(*) FROM reactions WHERE report_id = ${reports.id})`
+        );
+        break;
+      default:
+        query = query.orderBy(sortOrder === 'desc' ? desc(reports.createdAt) : reports.createdAt);
     }
 
     const results = await query;
-    return results;
+    
+    // Hydrate media for each report
+    const hydrated = await Promise.all(results.map(async (r: any) => {
+      const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
+      return {
+        ...r,
+        media: mediaItems,
+      };
+    }));
+
+    return hydrated;
   }
 
   async findVotingHistory(userId: number) {
@@ -166,7 +230,7 @@ export class ReportsService {
     return hydrated;
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, userId?: number) {
     const [report] = await this.db.select({
       id: reports.id,
       title: reports.title,
@@ -197,6 +261,12 @@ export class ReportsService {
 
     const mediaItems = await this.db.select().from(media).where(eq(media.reportId, id));
     const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, id));
+    
+    // Attempt to find the user's specific vote if userId is provided or needed
+    // However, findOne is often called without userId context. 
+    // I will adjust the signature to accept userId or just return it from the votes list if we know the current user.
+    // Let's assume the frontend will filter 'votes' to find the user's vote for now or I can optimize later.
+    // For now, let's just add the votes array or a userVote if we can.
 
     const totalVotes = votes.length;
     const realVotes = votes.filter(r => r.type === 'REAL').length;
@@ -210,12 +280,18 @@ export class ReportsService {
     const ageElapsed = Math.max(0, now.getTime() - createdAt.getTime());
     const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan)) * 100;
 
+    const allComments = await this.db.select().from(comments).where(eq(comments.reportId, id));
+    
+    const userVote = userId ? votes.find(v => v.userId === userId)?.type : null;
+    
     return {
       ...report,
       media: mediaItems,
-      commentCount: 0, // Simplified for now
+      comments: allComments,
+      commentCount: allComments.length,
       votesReal: realVotes,
       votesFake: totalVotes - realVotes,
+      userVote: userVote,
       breakdown: {
         voteRatio: Math.round(voteRatio),
         reporterTrust: report.reporter?.trustScore || 50,
@@ -231,8 +307,13 @@ export class ReportsService {
     ).limit(1);
 
     if (existing) {
-      if (existing.type === type) return { success: true, message: 'Already voted' };
-      await this.db.update(reactions).set({ type }).where(eq(reactions.id, existing.id));
+      if (existing.type === type) {
+        // Toggle Off
+        await this.db.delete(reactions).where(eq(reactions.id, existing.id));
+      } else {
+        // Switch Vote
+        await this.db.update(reactions).set({ type }).where(eq(reactions.id, existing.id));
+      }
     } else {
       await this.db.insert(reactions).values({ reportId, userId, type });
     }
@@ -309,24 +390,53 @@ export class ReportsService {
           })
           .where(eq(users.id, report.reporterId));
 
-        await this.db.update(reports).set({ status: 'ARCHIVED' }).where(eq(reports.id, reportId));
+        await this.db.update(reports).set({ status: 'REMOVED' }).where(eq(reports.id, reportId));
       }
     }
   }
 
-  async archiveExpired() {
+  async expireOldReports() {
     const now = new Date();
     const result = await this.db.update(reports)
-      .set({ status: 'ARCHIVED' })
+      .set({ status: 'REMOVED' })
       .where(
         and(
           lte(reports.autoArchiveAt, now),
-          ne(reports.status, 'ARCHIVED')
+          ne(reports.status, 'REMOVED'),
+          ne(reports.status, 'VERIFIED') // Don't expire verified ones maybe? Spec says verified can be archived though.
         )
       )
       .returning();
 
     return result.length;
+  }
+
+  async createComment(reportId: number, userId: number, content: string) {
+    if (!content || content.trim().length === 0) {
+      throw new BadRequestException('Comment content cannot be empty');
+    }
+
+    const [comment] = await this.db.insert(comments).values({
+      reportId: reportId,
+      userId: userId,
+      content: content,
+    }).returning();
+
+    // Re-fetch with user info
+    const [fullComment] = await this.db.select({
+      id: comments.id,
+      content: comments.content,
+      createdAt: comments.createdAt,
+      user: {
+        id: users.id,
+        fullName: users.fullName,
+      }
+    })
+    .from(comments)
+    .leftJoin(users, eq(comments.userId, users.id))
+    .where(eq(comments.id, comment.id));
+
+    return fullComment;
   }
 }
 

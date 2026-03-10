@@ -25,6 +25,16 @@ export class CreateReportDto {
   @IsInt()
   areaId: number;
 
+  @ApiPropertyOptional({ example: 'INFO', enum: ['INFO', 'WARNING', 'CRITICAL'] })
+  @IsOptional()
+  @IsString()
+  urgency?: string;
+
+  @ApiPropertyOptional({ example: 'Near the blue building' })
+  @IsOptional()
+  @IsString()
+  placeName?: string;
+
   @ApiProperty({ type: [String], example: ['https://example.com/image.jpg'] })
   @IsArray()
   mediaUrls: string[];
@@ -49,10 +59,15 @@ export class FilterReportDto {
   @IsInt()
   areaId?: number;
 
-  @ApiPropertyOptional({ enum: ['PENDING', 'VERIFIED', 'SOLVED', 'ARCHIVED'] })
+  @ApiPropertyOptional({ enum: ['PUBLISHED', 'UNDER_REVIEW', 'REMOVED', 'VERIFIED'] })
   @IsOptional()
   @IsString()
   status?: string;
+
+  @ApiPropertyOptional({ enum: ['INFO', 'WARNING', 'CRITICAL'] })
+  @IsOptional()
+  @IsString()
+  urgency?: string;
 
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
@@ -69,4 +84,14 @@ export class FilterReportDto {
   @IsOptional()
   @IsString()
   order?: string;
+
+  @ApiPropertyOptional({ example: 'pothole' })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  viewerId?: number;
 }

@@ -19,9 +19,10 @@ export class ReportsController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard) // Optional context but helpful for votes if logged in
   @ApiOperation({ summary: 'Get all reports with filters' })
-  findAll(@Query() filters: FilterReportDto) {
-    return this.reportsService.findAll(filters);
+  findAll(@Query() filters: FilterReportDto, @Request() req) {
+    return this.reportsService.findAll({ ...filters, viewerId: req.user?.userId });
   }
 
   @Get('user/me')
@@ -41,9 +42,11 @@ export class ReportsController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard) // Adding guard to ensure user context for voting status
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get a single report by ID' })
-  findOne(@Param('id') id: string) {
-    return this.reportsService.findOne(+id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.reportsService.findOne(+id, req.user?.userId);
   }
 
   @Post(':id/vote')
@@ -52,5 +55,13 @@ export class ReportsController {
   @ApiOperation({ summary: 'Vote REAL or FAKE on a report' })
   vote(@Param('id') id: string, @Body('type') type: 'REAL' | 'FAKE', @Request() req) {
     return this.reportsService.vote(+id, req.user.userId, type);
+  }
+
+  @Post(':id/comments')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Post a comment on a report' })
+  postComment(@Param('id') id: string, @Body('content') content: string, @Request() req) {
+    return this.reportsService.createComment(+id, req.user.userId, content);
   }
 }

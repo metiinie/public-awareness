@@ -2,7 +2,14 @@ import { pgTable, serial, text, timestamp, integer, boolean, pgEnum, varchar, in
 import { relations } from 'drizzle-orm';
 
 export const userRoleEnum = pgEnum('user_role', ['USER', 'ADMIN', 'SUPER_ADMIN']);
-export const reportStatusEnum = pgEnum('report_status', ['PENDING', 'VERIFIED', 'SOLVED', 'ARCHIVED', 'REJECTED']);
+export const reportStatusEnum = pgEnum('report_status', ['PUBLISHED', 'UNDER_REVIEW', 'REMOVED', 'VERIFIED']);
+export const urgencyEnum = pgEnum('urgency_level', ['INFO', 'WARNING', 'CRITICAL']);
+
+// --- Countries ---
+export const countries = pgTable('countries', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 100 }).notNull().unique(),
+});
 
 // --- Users ---
 export const users = pgTable('users', {
@@ -27,6 +34,7 @@ export const categories = pgTable('categories', {
 export const cities = pgTable('cities', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 100 }).notNull().unique(),
+  countryId: integer('country_id').references(() => countries.id),
 });
 
 export const areas = pgTable('areas', {
@@ -40,11 +48,13 @@ export const reports = pgTable('reports', {
   id: serial('id').primaryKey(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description').notNull(),
-  status: reportStatusEnum('status').default('PENDING').notNull(),
+  status: reportStatusEnum('status').default('PUBLISHED').notNull(),
+  urgency: urgencyEnum('urgency').default('INFO').notNull(),
   reporterId: integer('reporter_id').references(() => users.id).notNull(),
   categoryId: integer('category_id').references(() => categories.id).notNull(),
   cityId: integer('city_id').references(() => cities.id).notNull(),
   areaId: integer('area_id').references(() => areas.id).notNull(),
+  placeName: varchar('place_name', { length: 255 }),
   trustScore: integer('trust_score').default(50).notNull(), // Initial score for report
   createdAt: timestamp('created_at').defaultNow().notNull(),
   autoArchiveAt: timestamp('auto_archive_at'),
@@ -56,6 +66,7 @@ export const reports = pgTable('reports', {
     statusIdx: index('status_idx').on(table.status),
     confidenceIdx: index('confidence_idx').on(table.trustScore),
     createdIdx: index('created_idx').on(table.createdAt),
+    urgencyIdx: index('urgency_idx').on(table.urgency),
   };
 });
 
@@ -82,6 +93,26 @@ export const subscriptions = pgTable('subscriptions', {
   userId: integer('user_id').references(() => users.id).notNull(),
   areaId: integer('area_id').references(() => areas.id),
   categoryId: integer('category_id').references(() => categories.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// --- Moderation Reports ---
+export const moderationReports = pgTable('moderation_reports', {
+  id: serial('id').primaryKey(),
+  reportId: integer('report_id').references(() => reports.id).notNull(),
+  reason: text('reason').notNull(),
+  reporterId: integer('reporter_id').references(() => users.id).notNull(),
+  status: varchar('status', { length: 50 }).default('PENDING').notNull(), // PENDING, RESOLVED, DISMISSED
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// --- Audit Logs ---
+export const auditLogs = pgTable('audit_logs', {
+  id: serial('id').primaryKey(),
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  action: varchar('action', { length: 100 }).notNull(), // REMOVE_REPORT, BAN_USER, VERIFY_REPORT, etc.
+  reason: text('reason').notNull(),
+  targetId: integer('target_id'), // Multi-purpose ID (reportId, userId, etc.)
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
