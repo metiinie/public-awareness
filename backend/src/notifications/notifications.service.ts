@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { notifications, subscriptions, users, reports, areas, cities } from '../db/schema';
+import { notifications, subscriptions, users, reports, areas, cities, categories } from '../db/schema';
 import { eq, and, or, sql, isNull, desc } from 'drizzle-orm';
 
 @Injectable()
@@ -100,12 +100,16 @@ export class NotificationsService {
     }
 
     async getSubscriptions(userId: number) {
-        return this.db.query.subscriptions.findMany({
-            where: eq(subscriptions.userId, userId),
-            with: {
-                area: true,
-                category: true,
-            }
-        });
+        return this.db.select({
+            id: subscriptions.id,
+            areaId: subscriptions.areaId,
+            categoryId: subscriptions.categoryId,
+            area: { name: areas.name },
+            category: { name: categories.name },
+        })
+        .from(subscriptions)
+        .leftJoin(areas, eq(subscriptions.areaId, areas.id))
+        .leftJoin(categories, eq(subscriptions.categoryId, categories.id))
+        .where(eq(subscriptions.userId, userId));
     }
 }

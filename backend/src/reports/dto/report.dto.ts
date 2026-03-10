@@ -10,8 +10,8 @@ export class CreateReportDto {
 
   @ApiProperty({ example: 'Large pothole causing traffic delays.' })
   @IsString()
-  @IsNotEmpty()
-  description: string;
+  @IsOptional()
+  description?: string;
 
   @ApiProperty({ example: 1 })
   @IsInt()

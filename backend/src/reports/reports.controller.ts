@@ -14,6 +14,7 @@ export class ReportsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new report' })
   create(@Body() createReportDto: CreateReportDto, @Request() req) {
+    console.log(`[ReportsController] POST /reports hit by user ${req.user.userId}`);
     return this.reportsService.create(createReportDto, req.user.userId);
   }
 

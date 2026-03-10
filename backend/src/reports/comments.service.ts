@@ -9,9 +9,7 @@ export class CommentsService {
 
     async create(reportId: number, userId: number, content: string) {
         // Verify report exists
-        const report = await this.db.query.reports.findFirst({
-            where: eq(reports.id, reportId),
-        });
+        const [report] = await this.db.select({ id: reports.id }).from(reports).where(eq(reports.id, reportId)).limit(1);
 
         if (!report) {
             throw new NotFoundException('Report not found');
@@ -27,19 +25,20 @@ export class CommentsService {
     }
 
     async findByReportId(reportId: number) {
-        return this.db.query.comments.findMany({
-            where: eq(comments.reportId, reportId),
-            with: {
-                user: {
-                    columns: {
-                        id: true,
-                        fullName: true,
-                        trustScore: true,
-                    },
-                },
-            },
-            orderBy: [desc(comments.createdAt)],
-        });
+        return this.db.select({
+            id: comments.id,
+            content: comments.content,
+            createdAt: comments.createdAt,
+            user: {
+                id: users.id,
+                fullName: users.fullName,
+                trustScore: users.trustScore,
+            }
+        })
+        .from(comments)
+        .leftJoin(users, eq(comments.userId, users.id))
+        .where(eq(comments.reportId, reportId))
+        .orderBy(desc(comments.createdAt));
     }
 
     async remove(id: number, userId: number) {

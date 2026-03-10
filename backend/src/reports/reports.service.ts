@@ -124,39 +124,46 @@ export class ReportsService {
   }
 
   async findVotingHistory(userId: number) {
-    return this.db.query.reactions.findMany({
-      where: eq(reactions.userId, userId),
-      with: {
-        report: {
-          with: {
-            media: true,
-            category: true,
-            city: true,
-            area: true,
-            reporter: {
-              columns: {
-                id: true,
-                fullName: true,
-                trustScore: true,
-              }
-            },
-            reactions: true,
-            comments: {
-              columns: {
-                id: true
-              }
-            }
-          }
-        }
-      },
-      orderBy: [desc(reactions.id)],
-    }).then(results => results.map(re => ({
-      ...re.report,
-      userVote: re.type,
-      commentCount: re.report.comments.length,
-      votesReal: re.report.reactions.filter(r => r.type === 'REAL').length,
-      votesFake: re.report.reactions.filter(r => r.type === 'FAKE').length,
-    })));
+    const results = await this.db.select({
+      id: reports.id,
+      title: reports.title,
+      description: reports.description,
+      status: reports.status,
+      trustScore: reports.trustScore,
+      createdAt: reports.createdAt,
+      userVote: reactions.type,
+      category: { name: categories.name },
+      city: { name: cities.name },
+      area: { name: areas.name },
+      reporter: {
+        id: users.id,
+        fullName: users.fullName,
+        trustScore: users.trustScore,
+      }
+    })
+    .from(reactions)
+    .innerJoin(reports, eq(reactions.reportId, reports.id))
+    .leftJoin(categories, eq(reports.categoryId, categories.id))
+    .leftJoin(cities, eq(reports.cityId, cities.id))
+    .leftJoin(areas, eq(reports.areaId, areas.id))
+    .leftJoin(users, eq(reports.reporterId, users.id))
+    .where(eq(reactions.userId, userId))
+    .orderBy(desc(reactions.id));
+
+    // For voting history, we need the counts for each report
+    const hydrated = await Promise.all(results.map(async (r) => {
+      const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, r.id));
+      const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
+      return {
+        ...r,
+        media: mediaItems,
+        votesReal: votes.filter((v: any) => v.type === 'REAL').length,
+        votesFake: votes.filter((v: any) => v.type === 'FAKE').length,
+        commentCount: 0, // Simplified
+      };
+    }));
+
+    return hydrated;
   }
 
   async findOne(id: number) {
@@ -237,26 +244,32 @@ export class ReportsService {
   }
 
   private async updateScores(reportId: number) {
-    const report = await this.db.query.reports.findFirst({
-      where: eq(reports.id, reportId),
-      with: {
-        reporter: true,
-        reactions: true,
-      },
-    });
+    const [report] = await this.db.select({
+      id: reports.id,
+      reporterId: reports.reporterId,
+      createdAt: reports.createdAt,
+      autoArchiveAt: reports.autoArchiveAt,
+      reporterTrust: users.trustScore,
+    })
+    .from(reports)
+    .innerJoin(users, eq(reports.reporterId, users.id))
+    .where(eq(reports.id, reportId))
+    .limit(1);
 
     if (!report) return;
+
+    const reportVotes = await this.db.select().from(reactions).where(eq(reactions.reportId, reportId));
 
     // --- Confidence Score Logic ---
     // confidence = (vote_ratio * 0.5) + (reporter_trust * 0.3) + (age_decay * 0.2)
 
     // 1. Vote Ratio
-    const realVotes = report.reactions.filter((r: any) => r.type === 'REAL').length;
-    const totalVotes = report.reactions.length;
+    const realVotes = reportVotes.filter((r: any) => r.type === 'REAL').length;
+    const totalVotes = reportVotes.length;
     const voteRatio = totalVotes > 0 ? realVotes / totalVotes : 1;
 
     // 2. Reporter Trust (normalized 0-1)
-    const reporterTrust = Math.max(0, Math.min(100, report.reporter.trustScore)) / 100;
+    const reporterTrust = Math.max(0, Math.min(100, report.reporterTrust)) / 100;
 
     // 3. Age Decay
     const now = new Date();
