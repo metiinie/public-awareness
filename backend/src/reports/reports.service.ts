@@ -34,8 +34,15 @@ export class ReportsService {
     const [userRecord] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
     const userTrust = userRecord?.trustScore ?? 50;
     
+    // --- Profanity Check ---
+    const forbiddenWords = ['badword1', 'badword2', 'spam', 'fakeinfo']; // Placeholder for a real list
+    const hasProfanity = forbiddenWords.some(word => 
+      (reportData.title || '').toLowerCase().includes(word) || 
+      (reportData.description || '').toLowerCase().includes(word)
+    );
+
     let initialStatus = 'PUBLISHED';
-    if (reportData.urgency === 'CRITICAL' || userTrust < 20) {
+    if (reportData.urgency === 'CRITICAL' || userTrust < 20 || hasProfanity) {
       initialStatus = 'UNDER_REVIEW';
     }
 
@@ -280,7 +287,19 @@ export class ReportsService {
     const ageElapsed = Math.max(0, now.getTime() - createdAt.getTime());
     const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan)) * 100;
 
-    const allComments = await this.db.select().from(comments).where(eq(comments.reportId, id));
+    const allComments = await this.db.select({
+      id: comments.id,
+      content: comments.content,
+      createdAt: comments.createdAt,
+      user: {
+        id: users.id,
+        fullName: users.fullName,
+      }
+    })
+    .from(comments)
+    .leftJoin(users, eq(comments.userId, users.id))
+    .where(eq(comments.reportId, id))
+    .orderBy(desc(comments.id));
     
     const userVote = userId ? votes.find(v => v.userId === userId)?.type : null;
     

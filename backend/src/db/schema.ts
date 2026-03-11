@@ -85,6 +85,11 @@ export const reactions = pgTable('reactions', {
   userId: integer('user_id').references(() => users.id).notNull(),
   type: varchar('type', { length: 10 }).notNull(), // 'REAL' | 'FAKE'
   createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => {
+  return {
+    reportIdx: index('reaction_report_idx').on(table.reportId),
+    userReportIdx: index('reaction_user_report_idx').on(table.userId, table.reportId),
+  };
 });
 
 // --- Subscriptions ---
