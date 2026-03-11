@@ -62,6 +62,10 @@ export class ReportsService {
         autoArchiveAt: autoArchiveAt,
       }).returning();
 
+      if (initialStatus === 'UNDER_REVIEW') {
+        this.notificationsService.handleStatusChange(newReport, 'UNDER_REVIEW').catch(e => console.error('[ReportsService] Under-review notification failed', e));
+      }
+
       // Trigger cleanup occasionally (heuristic for CRON)
       if (Math.random() > 0.8) {
         this.expireOldReports().catch(err => console.error('Archive cleanup failed', err));
@@ -111,6 +115,9 @@ export class ReportsService {
       trustScore: reports.trustScore,
       createdAt: reports.createdAt,
       autoArchiveAt: reports.autoArchiveAt,
+      categoryId: reports.categoryId,
+      cityId: reports.cityId,
+      areaId: reports.areaId,
       category: { name: categories.name },
       city: { name: cities.name },
       area: { name: areas.name },
@@ -247,6 +254,9 @@ export class ReportsService {
       createdAt: reports.createdAt,
       autoArchiveAt: reports.autoArchiveAt,
       reporterId: reports.reporterId,
+      categoryId: reports.categoryId,
+      cityId: reports.cityId,
+      areaId: reports.areaId,
       category: { name: categories.name },
       city: { name: cities.name },
       area: { name: areas.name },
@@ -346,6 +356,7 @@ export class ReportsService {
   private async updateScores(reportId: number) {
     const [report] = await this.db.select({
       id: reports.id,
+      title: reports.title,
       reporterId: reports.reporterId,
       createdAt: reports.createdAt,
       autoArchiveAt: reports.autoArchiveAt,
@@ -400,6 +411,7 @@ export class ReportsService {
           .where(eq(users.id, report.reporterId));
 
         await this.db.update(reports).set({ status: 'VERIFIED' }).where(eq(reports.id, reportId));
+        this.notificationsService.handleStatusChange(report, 'VERIFIED').catch(e => console.error('[ReportsService] Status change notification failed', e));
       } else if (voteRatio <= 0.2) {
         // Decrease trust (-10) floor at 0
         await this.db.update(users)
@@ -410,6 +422,7 @@ export class ReportsService {
           .where(eq(users.id, report.reporterId));
 
         await this.db.update(reports).set({ status: 'REMOVED' }).where(eq(reports.id, reportId));
+        this.notificationsService.handleStatusChange(report, 'REMOVED').catch(e => console.error('[ReportsService] Status change notification failed', e));
       }
     }
   }

@@ -1,5 +1,5 @@
-import { Controller, Get, Patch, Param, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Patch, Param, UseGuards, Request, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -12,9 +12,17 @@ export class NotificationsController {
     @UseGuards(JwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Get all notifications for the current user' })
-    findAll(@Request() req) {
+    @ApiQuery({ name: 'limit', required: false, type: Number })
+    @ApiQuery({ name: 'cursor', required: false, type: Number })
+    findAll(
+        @Request() req,
+        @Query('limit') limit?: string,
+        @Query('cursor') cursor?: string,
+    ) {
         try {
-            return this.notificationsService.findAllForUser(req.user.userId);
+            const parsedLimit = limit ? parseInt(limit, 10) : 20;
+            const parsedCursor = cursor ? parseInt(cursor, 10) : undefined;
+            return this.notificationsService.findAllForUser(req.user.userId, parsedLimit, parsedCursor);
         } catch (error) {
             console.error('Error fetching notifications for user:', req.user.userId, error);
             throw error;
