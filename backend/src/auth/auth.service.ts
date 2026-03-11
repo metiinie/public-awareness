@@ -18,6 +18,7 @@ export class AuthService {
       id: users.id,
       email: users.email,
       fullName: users.fullName,
+      avatar: users.avatar,
       role: users.role,
       trustScore: users.trustScore,
       createdAt: users.createdAt,
@@ -86,7 +87,10 @@ export class AuthService {
 
   async updateProfile(userId: number, updateDto: UpdateProfileDto) {
     const [updatedUser] = await this.db.update(users)
-      .set(updateDto)
+      .set({
+        ...updateDto,
+        updatedAt: new Date()
+      })
       .where(eq(users.id, userId))
       .returning();
 

@@ -14,6 +14,8 @@ import { join } from 'path';
 import { UploadModule } from './upload/upload.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { NestModule, MiddlewareConsumer } from '@nestjs/common';
 
 @Module({
   imports: [
@@ -49,4 +51,8 @@ import { ScheduleModule } from '@nestjs/schedule';
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggerMiddleware).forRoutes('*');
+  }
+}

@@ -12,7 +12,7 @@ export class ReportsTask {
     async handleAutoArchive() {
         this.logger.debug('Running auto-archive task...');
         try {
-            const archivedCount = await this.reportsService.archiveExpired();
+            const archivedCount = await this.reportsService.expireOldReports();
             if (archivedCount > 0) {
                 this.logger.log(`Successfully archived ${archivedCount} expired reports.`);
             }
