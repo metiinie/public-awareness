@@ -1,4 +1,4 @@
-import { Controller, Post, UseInterceptors, UploadedFile, UseGuards } from '@nestjs/common';
+import { Controller, Post, UseInterceptors, UploadedFile, UseGuards, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -24,9 +24,9 @@ export class UploadController {
     })
     @UseInterceptors(FileInterceptor('file')) // Storage is now handled globally in UploadModule
     uploadFile(@UploadedFile() file: any) {
-        if (!file) {
-            console.error('[UploadController] No file received in request');
-            return { error: 'No file uploaded' };
+        if (!file || !file.path) {
+            console.error('[UploadController] Invalid file received in request');
+            throw new BadRequestException('File upload failed or no file received');
         }
         console.log('[UploadController] File uploaded successfully:', file.path);
         return {

@@ -14,28 +14,33 @@ export class ReportsService {
 
   async create(createReportDto: CreateReportDto, userId: number) {
     const { mediaUrls, ...reportData } = createReportDto;
-    console.log(`[ReportsService] Creating report for user ${userId}`, { categoryId: reportData.categoryId, mediaCount: mediaUrls?.length });
+    console.log(`[ReportsService] Starting creation for user ${userId}`);
+    console.log(`[ReportsService] Data:`, JSON.stringify(reportData));
+    console.log(`[ReportsService] Media URLs:`, mediaUrls);
 
     // --- Evidence Rule ---
     if (!mediaUrls || mediaUrls.length === 0) {
+      console.warn('[ReportsService] Blocking: No media URLs provided');
       throw new BadRequestException('At least one image or video is required to submit a report.');
     }
 
     // --- Auto Archiving Logic ---
     let archiveHours = 24;
+    // Heuristic: Infrastructure (cat 1) expires faster in this spec
     if (createReportDto.categoryId === 1) archiveHours = 6;
 
     const autoArchiveAt = new Date();
     autoArchiveAt.setHours(autoArchiveAt.getHours() + archiveHours);
+    console.log(`[ReportsService] Auto-archive set to: ${autoArchiveAt.toISOString()} (${archiveHours}h)`);
 
     // --- Trust & Urgency Rules ---
-    // Critical reports or low-trust users (< 20) start as UNDER_REVIEW
-    // High-trust users (> 80) get a starting trust boost
+    console.log(`[ReportsService] Fetching user ${userId} for trust score...`);
     const [userRecord] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!userRecord) console.warn(`[ReportsService] User ${userId} not found in DB!`);
     const userTrust = userRecord?.trustScore ?? 50;
     
     // --- Profanity Check ---
-    const forbiddenWords = ['badword1', 'badword2', 'spam', 'fakeinfo']; // Placeholder for a real list
+    const forbiddenWords = ['badword1', 'badword2', 'spam', 'fakeinfo'];
     const hasProfanity = forbiddenWords.some(word => 
       (reportData.title || '').toLowerCase().includes(word) || 
       (reportData.description || '').toLowerCase().includes(word)
@@ -45,6 +50,7 @@ export class ReportsService {
     if (reportData.urgency === 'CRITICAL' || userTrust < 20 || hasProfanity) {
       initialStatus = 'UNDER_REVIEW';
     }
+    console.log(`[ReportsService] User Trust: ${userTrust}, Initial Status: ${initialStatus}`);
 
     let initialReportTrust = 50;
     if (userTrust > 80) initialReportTrust = 70;
@@ -52,6 +58,7 @@ export class ReportsService {
 
     try {
       // 1. Insert report
+      console.log(`[ReportsService] Inserting report into DB...`);
       const [newReport] = await this.db.insert(reports).values({
         ...reportData,
         reporterId: userId,
@@ -62,42 +69,48 @@ export class ReportsService {
         autoArchiveAt: autoArchiveAt,
       }).returning();
 
+      console.log(`[ReportsService] Report inserted successfully. ID: ${newReport.id}`);
+
       if (initialStatus === 'UNDER_REVIEW') {
         this.notificationsService.handleStatusChange(newReport, 'UNDER_REVIEW').catch(e => console.error('[ReportsService] Under-review notification failed', e));
       }
 
-      // Trigger cleanup occasionally (heuristic for CRON)
-      if (Math.random() > 0.8) {
-        this.expireOldReports().catch(err => console.error('Archive cleanup failed', err));
-      }
-
-      console.log(`[ReportsService] Inserted report ID: ${newReport.id}`);
-
       // 2. Insert media
       if (mediaUrls && mediaUrls.length > 0) {
-        const mediaRecords = mediaUrls.map((url) => {
-          const isVideo = url.toLowerCase().match(/\.(mp4|mov|avi|wmv)$/) || url.includes('video');
-          return {
-            reportId: newReport.id,
-            url,
-            type: isVideo ? 'VIDEO' : 'IMAGE',
-          };
-        });
-        await this.db.insert(media).values(mediaRecords);
-        console.log(`[ReportsService] Attached ${mediaRecords.length} media records`);
+        console.log(`[ReportsService] Inserting ${mediaUrls.length} media records...`);
+        const mediaRecords = mediaUrls
+          .filter(url => typeof url === 'string')
+          .map((url) => {
+            const isVideo = url.toLowerCase().match(/\.(mp4|mov|avi|wmv)$/) || url.includes('video');
+            return {
+              reportId: newReport.id,
+              url,
+              type: isVideo ? 'VIDEO' : 'IMAGE',
+            };
+          });
+        
+        if (mediaRecords.length > 0) {
+          await this.db.insert(media).values(mediaRecords);
+          console.log(`[ReportsService] Media records inserted.`);
+        } else {
+          console.warn('[ReportsService] No valid media records to insert');
+        }
       }
 
       // 3. Trigger Notifications
+      console.log(`[ReportsService] Fetching full report for notifications...`);
       const fullReport = await this.findOne(newReport.id);
       try {
         await this.notificationsService.handleNewReport(fullReport);
+        console.log(`[ReportsService] Notifications triggered.`);
       } catch (e) {
-        console.error('[ReportsService] Notification trigger failed', e);
+        console.error('[ReportsService] Notification trigger failed:', e.message);
       }
 
       return fullReport;
     } catch (error) {
-      console.error('[ReportsService] Create operation failed:', error);
+      console.error('[ReportsService] CRITICAL FAILURE in create():', error.message);
+      if (error.stack) console.error(error.stack);
       throw error;
     }
   }
@@ -293,7 +306,7 @@ export class ReportsService {
     const now = new Date();
     const createdAt = new Date(report.createdAt);
     const autoArchiveAt = new Date(report.autoArchiveAt);
-    const totalLifeSpan = autoArchiveAt.getTime() - createdAt.getTime();
+    const totalLifeSpan = Math.max(1, autoArchiveAt.getTime() - createdAt.getTime());
     const ageElapsed = Math.max(0, now.getTime() - createdAt.getTime());
     const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan)) * 100;
 
@@ -386,7 +399,7 @@ export class ReportsService {
     const now = new Date();
     const createdAt = new Date(report.createdAt);
     const autoArchiveAt = new Date(report.autoArchiveAt);
-    const totalLifeSpan = autoArchiveAt.getTime() - createdAt.getTime();
+    const totalLifeSpan = Math.max(1, autoArchiveAt.getTime() - createdAt.getTime());
     const ageElapsed = now.getTime() - createdAt.getTime();
     const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan));
 
