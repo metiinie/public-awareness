@@ -32,13 +32,18 @@ export class NotificationsService {
         // Create notifications for all matched users
         const newNotifications = matches
             .filter((sub: any) => sub.userId !== report.reporterId) // Don't notify the reporter themselves
-            .map((sub: any) => ({
-                userId: sub.userId,
-                reportId: report.id,
-                type: 'NEW_REPORT',
-                message: `⚠️ New ${report.category?.name || 'issue'} reported in ${report.area?.name || 'your area'}.`,
-                isRead: false,
-            }));
+            .map((sub: any) => {
+                const isCritical = report.urgency === 'CRITICAL';
+                return {
+                    userId: sub.userId,
+                    reportId: report.id,
+                    type: isCritical ? 'CRITICAL_ALERT' : 'NEW_REPORT',
+                    message: isCritical 
+                        ? `🚨 CRITICAL ALERT: ${report.title} reported in ${report.area?.name || 'your area'}!`
+                        : `⚠️ New ${report.category?.name || 'issue'} reported in ${report.area?.name || 'your area'}.`,
+                    isRead: false,
+                };
+            });
 
         if (newNotifications.length > 0) {
             await this.db.insert(notifications).values(newNotifications);
