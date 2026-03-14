@@ -47,6 +47,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
         if (exception instanceof Error && exception.stack) {
           this.logger.error(exception.stack);
         }
+
+        // Write to a debug file
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const logPath = path.join(process.cwd(), 'error_debug.log');
+          const logEntry = `[${new Date().toISOString()}] 500 Error on ${responseBody.path} [${request.method}]\n` +
+            `Error: ${exception instanceof Error ? exception.message : JSON.stringify(exception)}\n` +
+            `Stack: ${exception instanceof Error ? exception.stack : 'No stack'}\n` +
+            `Body: ${JSON.stringify(request.body)}\n` +
+            `-------------------------------------------\n`;
+          fs.appendFileSync(logPath, logEntry);
+        } catch (e) {
+          this.logger.error('Failed to write to debug log file', e);
+        }
       }
 
       if (httpStatus === 400 && exception instanceof HttpException) {

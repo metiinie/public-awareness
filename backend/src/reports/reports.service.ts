@@ -48,6 +48,7 @@ export class ReportsService {
     else if (userTrust < 30) initialReportTrust = 30;
 
     try {
+      console.log('[ReportsService] Inserting report with data:', JSON.stringify(reportData));
       // 1. Insert report
       const [newReport] = await this.db.insert(reports).values({
         ...reportData,
@@ -59,6 +60,8 @@ export class ReportsService {
         trustScore: initialReportTrust,
         autoArchiveAt: autoArchiveAt,
       }).returning();
+
+      console.log('[ReportsService] Report inserted, ID:', newReport?.id);
 
       if (initialStatus === 'UNDER_REVIEW') {
         this.notificationsService.handleStatusChange(newReport, 'UNDER_REVIEW').catch(e => console.error('[ReportsService] Under-review notification failed', e));
@@ -92,7 +95,7 @@ export class ReportsService {
 
       return fullReport;
     } catch (error) {
-      console.error('[ReportsService] CRITICAL FAILURE in create():', error.message);
+      console.error('[ReportsService] CRITICAL FAILURE in create():', error);
       if (error.stack) console.error(error.stack);
       throw error;
     }
@@ -228,9 +231,14 @@ export class ReportsService {
     
     query = this.applyReportJoins(query);
     
+    console.log('[ReportsService] Finding report with ID:', id);
     const [report] = await query.where(eq(reports.id, id)).limit(1);
 
-    if (!report) throw new NotFoundException('Report not found');
+    if (!report) {
+       console.warn('[ReportsService] Report not found:', id);
+       throw new NotFoundException('Report not found');
+    }
+    console.log('[ReportsService] Report found:', report.id);
 
     const mediaItems = await this.db.select().from(media).where(eq(media.reportId, id));
     const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, id));
@@ -505,9 +513,9 @@ export class ReportsService {
         fullName: users.fullName,
         trustScore: users.trustScore,
       },
-      votesReal: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL'), 0)`,
-      votesFake: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE'), 0)`,
-      commentCount: sql<number>`COALESCE((SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id}), 0)`,
+      votesReal: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL')`,
+      votesFake: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE')`,
+      commentCount: sql<number>`(SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id})`,
       userVote: viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} LIMIT 1)` : sql`NULL`,
     };
   }

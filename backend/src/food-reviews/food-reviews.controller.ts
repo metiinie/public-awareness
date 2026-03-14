@@ -54,48 +54,49 @@ export class FoodReviewsController {
       throw new HttpException('Title is required', HttpStatus.BAD_REQUEST);
     }
 
-    // Verify restaurant exists
-    const [restaurant] = await this.db
-      .select()
-      .from(restaurants)
-      .where(eq(restaurants.id, +restaurantId));
-    if (!restaurant) {
-      throw new HttpException('Restaurant not found', HttpStatus.NOT_FOUND);
-    }
-
     // Insert the review
-    const [created] = await this.db
-      .insert(foodReviews)
-      .values({
-        restaurantId: +restaurantId,
-        userId: req.user.userId,
-        rating,
-        title,
-        body: reviewBody,
-        mediaUrls: mediaUrls ?? [],
-      })
-      .returning();
-
-    // Update restaurant avgRating and reviewCount
-    const stats = await this.db
-      .select({
-        avgRating: avg(foodReviews.rating),
-        reviewCount: count(foodReviews.id),
-      })
-      .from(foodReviews)
-      .where(eq(foodReviews.restaurantId, +restaurantId));
-
-    if (stats[0]) {
-      await this.db
-        .update(restaurants)
-        .set({
-          avgRating: parseFloat(stats[0].avgRating ?? '0'),
-          reviewCount: Number(stats[0].reviewCount),
+    try {
+      console.log(`[FoodReviewsController] Inserting review for restaurant ${restaurantId} by user ${req.user.userId}`);
+      console.log(`[FoodReviewsController] Review Data:`, JSON.stringify({ rating, title, mediaUrls }));
+      const [created] = await this.db
+        .insert(foodReviews)
+        .values({
+          restaurantId: +restaurantId,
+          userId: req.user.userId,
+          rating,
+          title,
+          body: reviewBody,
+          mediaUrls: mediaUrls ?? [],
         })
-        .where(eq(restaurants.id, +restaurantId));
-    }
+        .returning();
 
-    return created;
+      console.log(`[FoodReviewsController] Review inserted, ID: ${created?.id}`);
+
+      // Update restaurant avgRating and reviewCount
+      const stats = await this.db
+        .select({
+          avgRating: avg(foodReviews.rating),
+          reviewCount: count(foodReviews.id),
+        })
+        .from(foodReviews)
+        .where(eq(foodReviews.restaurantId, +restaurantId));
+
+      if (stats[0]) {
+        console.log(`[FoodReviewsController] Updating restaurant stats:`, stats[0]);
+        await this.db
+          .update(restaurants)
+          .set({
+            avgRating: parseFloat(stats[0].avgRating ?? '0'),
+            reviewCount: Number(stats[0].reviewCount),
+          })
+          .where(eq(restaurants.id, +restaurantId));
+      }
+
+      return created;
+    } catch (error) {
+       console.error(`[FoodReviewsController] CRITICAL FAILURE:`, error);
+       throw error;
+    }
   }
 
   // ─── GET /food-reviews/user/me ─────────────────────────────────────────
