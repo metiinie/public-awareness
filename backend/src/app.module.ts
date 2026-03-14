@@ -23,9 +23,33 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 
 
 
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { WinstonModule } from 'nest-winston';
+import * as winston from 'winston';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    WinstonModule.forRoot({
+      transports: [
+        new winston.transports.Console({
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.colorize(),
+            winston.format.simple(),
+          ),
+        }),
+        new winston.transports.File({
+          filename: 'logs/error.log',
+          level: 'error',
+        }),
+        new winston.transports.File({ filename: 'logs/combined.log' }),
+      ],
+    }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100,
+    }]),
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -47,8 +71,6 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
     FoodReviewsModule,
     AdminModule,
     ServeStaticModule.forRoot({
-
-
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',
     }),
@@ -58,10 +80,15 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
     AppService,
     {
       provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
       useClass: RolesGuard,
     },
   ],
 })
+
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(LoggerMiddleware).forRoutes('*');
