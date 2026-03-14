@@ -1,8 +1,12 @@
 import { pgTable, serial, text, timestamp, integer, boolean, pgEnum, varchar, index, real } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
-export const userRoleEnum = pgEnum('user_role', ['USER', 'ADMIN', 'SUPER_ADMIN']);
-export const reportStatusEnum = pgEnum('report_status', ['PUBLISHED', 'UNDER_REVIEW', 'REMOVED', 'VERIFIED']);
+export const userRoleEnum = pgEnum('user_role', ['USER', 'ADMIN', 'MODERATOR', 'SUPER_ADMIN']);
+
+export const accountStatusEnum = pgEnum('account_status', ['ACTIVE', 'SUSPENDED', 'BANNED']);
+export const reportStatusEnum = pgEnum('report_status', ['REPORTED', 'UNDER_REVIEW', 'REMOVED', 'VERIFIED', 'RESOLVED', 'ARCHIVED']);
+
+
 export const urgencyEnum = pgEnum('urgency_level', ['INFO', 'WARNING', 'CRITICAL']);
 
 // --- Countries ---
@@ -20,16 +24,22 @@ export const users = pgTable('users', {
   avatar: text('avatar'),
   role: userRoleEnum('role').default('USER').notNull(),
   trustScore: integer('trust_score').default(50).notNull(),
+  status: accountStatusEnum('status').default('ACTIVE').notNull(),
+  suspensionUntil: timestamp('suspension_until'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
 
 // --- Categories ---
 export const categories = pgTable('categories', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 100 }).notNull().unique(),
   icon: varchar('icon', { length: 100 }), // Icon name for frontend
+  isActive: boolean('is_active').default(true).notNull(),
 });
+
+
 
 // --- Locations ---
 export const cities = pgTable('cities', {
@@ -49,7 +59,8 @@ export const reports = pgTable('reports', {
   id: serial('id').primaryKey(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description').notNull(),
-  status: reportStatusEnum('status').default('PUBLISHED').notNull(),
+  status: reportStatusEnum('status').default('REPORTED').notNull(),
+
   urgency: urgencyEnum('urgency').default('INFO').notNull(),
   reporterId: integer('reporter_id').references(() => users.id).notNull(),
   categoryId: integer('category_id').references(() => categories.id).notNull(),

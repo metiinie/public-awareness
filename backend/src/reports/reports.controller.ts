@@ -18,14 +18,8 @@ export class ReportsController {
     return this.reportsService.create(createReportDto, req.user.userId);
   }
 
-  @Post('debug-create')
-  @ApiOperation({ summary: 'Create a new report (bypass auth for debug)' })
-  debugCreate(@Body() createReportDto: CreateReportDto) {
-    console.log(`[ReportsController] POST /reports/debug-create hit`);
-    return this.reportsService.create(createReportDto, 1); // Mock user ID 1
-  }
-
   @Get()
+
   @UseGuards(JwtAuthGuard) // Optional context but helpful for votes if logged in
   @ApiOperation({ summary: 'Get all reports with filters' })
   findAll(@Query() filters: FilterReportDto, @Request() req) {

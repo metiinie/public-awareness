@@ -18,6 +18,9 @@ import { RestaurantsModule } from './restaurants/restaurants.module';
 import { FoodReviewsModule } from './food-reviews/food-reviews.module';
 import { NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { AdminModule } from './admin/admin.module';
+import { LoggerMiddleware } from './common/middleware/logger.middleware';
+
+
 
 
 @Module({
@@ -44,6 +47,8 @@ import { AdminModule } from './admin/admin.module';
     FoodReviewsModule,
     AdminModule,
     ServeStaticModule.forRoot({
+
+
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',
     }),
