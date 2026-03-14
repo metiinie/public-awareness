@@ -14,29 +14,21 @@ export class ReportsService {
 
   async create(createReportDto: CreateReportDto, userId: number) {
     const { mediaUrls, ...reportData } = createReportDto;
-    console.log(`[ReportsService] Starting creation for user ${userId}`);
-    console.log(`[ReportsService] Data:`, JSON.stringify(reportData));
-    console.log(`[ReportsService] Media URLs:`, mediaUrls);
 
     // --- Evidence Rule ---
     if (!mediaUrls || mediaUrls.length === 0) {
-      console.warn('[ReportsService] Blocking: No media URLs provided');
       throw new BadRequestException('At least one image or video is required to submit a report.');
     }
 
     // --- Auto Archiving Logic ---
     let archiveHours = 24;
-    // Heuristic: Infrastructure (cat 1) expires faster in this spec
     if (createReportDto.categoryId === 1) archiveHours = 6;
 
     const autoArchiveAt = new Date();
     autoArchiveAt.setHours(autoArchiveAt.getHours() + archiveHours);
-    console.log(`[ReportsService] Auto-archive set to: ${autoArchiveAt.toISOString()} (${archiveHours}h)`);
 
     // --- Trust & Urgency Rules ---
-    console.log(`[ReportsService] Fetching user ${userId} for trust score...`);
     const [userRecord] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
-    if (!userRecord) console.warn(`[ReportsService] User ${userId} not found in DB!`);
     const userTrust = userRecord?.trustScore ?? 50;
     
     // --- Profanity Check ---
@@ -50,7 +42,6 @@ export class ReportsService {
     if (reportData.urgency === 'CRITICAL' || userTrust < 20 || hasProfanity) {
       initialStatus = 'UNDER_REVIEW';
     }
-    console.log(`[ReportsService] User Trust: ${userTrust}, Initial Status: ${initialStatus}`);
 
     let initialReportTrust = 50;
     if (userTrust > 80) initialReportTrust = 70;
@@ -58,7 +49,6 @@ export class ReportsService {
 
     try {
       // 1. Insert report
-      console.log(`[ReportsService] Inserting report into DB...`);
       const [newReport] = await this.db.insert(reports).values({
         ...reportData,
         description: reportData.description || '',
@@ -70,15 +60,12 @@ export class ReportsService {
         autoArchiveAt: autoArchiveAt,
       }).returning();
 
-      console.log(`[ReportsService] Report inserted successfully. ID: ${newReport.id}`);
-
       if (initialStatus === 'UNDER_REVIEW') {
         this.notificationsService.handleStatusChange(newReport, 'UNDER_REVIEW').catch(e => console.error('[ReportsService] Under-review notification failed', e));
       }
 
       // 2. Insert media
       if (mediaUrls && mediaUrls.length > 0) {
-        console.log(`[ReportsService] Inserting ${mediaUrls.length} media records...`);
         const mediaRecords = mediaUrls
           .filter(url => typeof url === 'string')
           .map((url) => {
@@ -92,18 +79,13 @@ export class ReportsService {
         
         if (mediaRecords.length > 0) {
           await this.db.insert(media).values(mediaRecords);
-          console.log(`[ReportsService] Media records inserted.`);
-        } else {
-          console.warn('[ReportsService] No valid media records to insert');
         }
       }
 
       // 3. Trigger Notifications
-      console.log(`[ReportsService] Fetching full report for notifications...`);
       const fullReport = await this.findOne(newReport.id);
       try {
         await this.notificationsService.handleNewReport(fullReport);
-        console.log(`[ReportsService] Notifications triggered.`);
       } catch (e) {
         console.error('[ReportsService] Notification trigger failed:', e.message);
       }
@@ -119,50 +101,32 @@ export class ReportsService {
   async findAll(filters: FilterReportDto) {
     const { categoryId, cityId, areaId, status, reporterId, sortBy = 'createdAt', order = 'desc' } = filters;
 
-    let query = this.db.select({
-      id: reports.id,
-      title: reports.title,
-      description: reports.description,
-      status: reports.status,
-      urgency: reports.urgency,
-      placeName: reports.placeName,
-      trustScore: reports.trustScore,
-      createdAt: reports.createdAt,
-      autoArchiveAt: reports.autoArchiveAt,
-      categoryId: reports.categoryId,
-      cityId: reports.cityId,
-      areaId: reports.areaId,
-      category: { name: categories.name },
-      city: { name: cities.name },
-      area: { name: areas.name },
-      reporter: {
-        id: users.id,
-        fullName: users.fullName,
-        trustScore: users.trustScore,
-      },
-      votesReal: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL'), 0)`,
-      votesFake: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE'), 0)`,
-      commentCount: sql<number>`COALESCE((SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id}), 0)`,
-      userVote: filters.viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${filters.viewerId} LIMIT 1)` : sql`NULL`,
-    })
-    .from(reports)
-    .leftJoin(categories, eq(reports.categoryId, categories.id))
-    .leftJoin(cities, eq(reports.cityId, cities.id))
-    .leftJoin(areas, eq(reports.areaId, areas.id))
-    .leftJoin(users, eq(reports.reporterId, users.id));
+    let query = this.db.select(this.getReportSelect(filters.viewerId))
+    .from(reports);
+    
+    query = this.applyReportJoins(query);
 
     const whereClauses: any[] = [];
     
     // Default filter: Only show PUBLISHED/VERIFIED and non-expired if not searching for something specific
+    // EXCEPT: Always show reports to their own author (viewerId === reporterId)
     if (!status && !reporterId) {
-      whereClauses.push(sql`${reports.status} IN ('PUBLISHED', 'VERIFIED')`);
-      whereClauses.push(sql`${reports.autoArchiveAt} > NOW()`);
+      const globalVisibility = and(
+        ne(reports.status, 'REMOVED'),
+        or(
+          sql`${reports.status} IN ('PUBLISHED', 'VERIFIED') AND ${reports.autoArchiveAt} > NOW()`,
+          filters.viewerId ? eq(reports.reporterId, filters.viewerId) : sql`FALSE`
+        )
+      );
+      whereClauses.push(globalVisibility);
     }
+
 
     if (categoryId) whereClauses.push(eq(reports.categoryId, categoryId));
     if (cityId) whereClauses.push(eq(reports.cityId, cityId));
     if (areaId) whereClauses.push(eq(reports.areaId, areaId));
     if (status) whereClauses.push(eq(reports.status, status as any));
+
     if (filters.urgency) whereClauses.push(eq(reports.urgency, filters.urgency as any));
     if (filters.search) {
       whereClauses.push(or(
@@ -259,46 +223,18 @@ export class ReportsService {
   }
 
   async findOne(id: number, userId?: number) {
-    const [report] = await this.db.select({
-      id: reports.id,
-      title: reports.title,
-      description: reports.description,
-      status: reports.status,
-      trustScore: reports.trustScore,
-      createdAt: reports.createdAt,
-      autoArchiveAt: reports.autoArchiveAt,
-      reporterId: reports.reporterId,
-      categoryId: reports.categoryId,
-      cityId: reports.cityId,
-      areaId: reports.areaId,
-      category: { name: categories.name },
-      city: { name: cities.name },
-      area: { name: areas.name },
-      reporter: {
-        id: users.id,
-        fullName: users.fullName,
-        trustScore: users.trustScore,
-      }
-    })
-    .from(reports)
-    .leftJoin(categories, eq(reports.categoryId, categories.id))
-    .leftJoin(cities, eq(reports.cityId, cities.id))
-    .leftJoin(areas, eq(reports.areaId, areas.id))
-    .leftJoin(users, eq(reports.reporterId, users.id))
-    .where(eq(reports.id, id))
-    .limit(1);
+    let query = this.db.select(this.getReportSelect(userId))
+    .from(reports);
+    
+    query = this.applyReportJoins(query);
+    
+    const [report] = await query.where(eq(reports.id, id)).limit(1);
 
     if (!report) throw new NotFoundException('Report not found');
 
     const mediaItems = await this.db.select().from(media).where(eq(media.reportId, id));
     const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, id));
     
-    // Attempt to find the user's specific vote if userId is provided or needed
-    // However, findOne is often called without userId context. 
-    // I will adjust the signature to accept userId or just return it from the votes list if we know the current user.
-    // Let's assume the frontend will filter 'votes' to find the user's vote for now or I can optimize later.
-    // For now, let's just add the votes array or a userVote if we can.
-
     const totalVotes = votes.length;
     const realVotes = votes.filter(r => r.type === 'REAL').length;
     const voteRatio = totalVotes > 0 ? (realVotes / totalVotes) * 100 : 100;
@@ -448,44 +384,13 @@ export class ReportsService {
       return []; // No subscriptions, return nothing
     }
 
-    let query = this.db.select({
-      id: reports.id,
-      title: reports.title,
-      description: reports.description,
-      status: reports.status,
-      urgency: reports.urgency,
-      placeName: reports.placeName,
-      trustScore: reports.trustScore,
-      createdAt: reports.createdAt,
-      autoArchiveAt: reports.autoArchiveAt,
-      categoryId: reports.categoryId,
-      cityId: reports.cityId,
-      areaId: reports.areaId,
-      category: { name: categories.name },
-      city: { name: cities.name },
-      area: { name: areas.name },
-      reporter: {
-        id: users.id,
-        fullName: users.fullName,
-        trustScore: users.trustScore,
-      },
-      votesReal: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL'), 0)`,
-      votesFake: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE'), 0)`,
-      commentCount: sql<number>`COALESCE((SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id}), 0)`,
-      userVote: filters?.viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${filters.viewerId} LIMIT 1)` : sql`NULL`,
-    })
-    .from(reports)
-    .leftJoin(categories, eq(reports.categoryId, categories.id))
-    .leftJoin(cities, eq(reports.cityId, cities.id))
-    .leftJoin(areas, eq(reports.areaId, areas.id))
-    .leftJoin(users, eq(reports.reporterId, users.id));
+    let query = this.db.select(this.getReportSelect(filters?.viewerId))
+    .from(reports);
+    
+    query = this.applyReportJoins(query);
 
     const whereClauses: any[] = [];
     
-    // Only show PUBLISHED/VERIFIED and non-expired
-    whereClauses.push(sql`${reports.status} IN ('PUBLISHED', 'VERIFIED')`);
-    whereClauses.push(sql`${reports.autoArchiveAt} > NOW()`);
-
     // Build subscription OR conditions
     // Each subscription matches by area AND (specific category OR any category)
     const subscriptionConditions = userSubscriptions.map(sub => {
@@ -496,14 +401,29 @@ export class ReportsService {
       }
     });
 
-    whereClauses.push(or(...subscriptionConditions));
+    const subFilter = or(...subscriptionConditions);
+    
+    // Visibility rules for subscribed feed:
+    // 1. Must match subscription conditions
+    // 2. Must NOT be REMOVED
+    // 3. AND (is PUBLISHED/VERIFIED/non-expired OR is CRITICAL OR is the viewer themselves)
+    
+    const visibilityConditions = and(
+      ne(reports.status, 'REMOVED'),
+      or(
+        sql`${reports.status} IN ('PUBLISHED', 'VERIFIED') AND ${reports.autoArchiveAt} > NOW()`,
+        eq(reports.urgency, 'CRITICAL'),
+        filters?.viewerId ? eq(reports.reporterId, filters.viewerId) : sql`FALSE`
+      )
+    );
+
+    whereClauses.push(and(subFilter, visibilityConditions));
 
     if (whereClauses.length > 0) {
       query = query.where(and(...whereClauses));
     }
 
     query = query.orderBy(desc(reports.createdAt)); // Default order by newest for subscribed reports
-    // can add pagination limit here later
 
     const results = await query;
     
@@ -527,7 +447,7 @@ export class ReportsService {
         and(
           lte(reports.autoArchiveAt, now),
           ne(reports.status, 'REMOVED'),
-          ne(reports.status, 'VERIFIED') // Don't expire verified ones maybe? Spec says verified can be archived though.
+          ne(reports.status, 'VERIFIED')
         )
       )
       .returning();
@@ -561,6 +481,43 @@ export class ReportsService {
     .where(eq(comments.id, comment.id));
 
     return fullComment;
+  }
+
+  private getReportSelect(viewerId?: number) {
+    return {
+      id: reports.id,
+      title: reports.title,
+      description: reports.description,
+      status: reports.status,
+      urgency: reports.urgency,
+      placeName: reports.placeName,
+      trustScore: reports.trustScore,
+      createdAt: reports.createdAt,
+      autoArchiveAt: reports.autoArchiveAt,
+      categoryId: reports.categoryId,
+      cityId: reports.cityId,
+      areaId: reports.areaId,
+      category: { name: categories.name },
+      city: { name: cities.name },
+      area: { name: areas.name },
+      reporter: {
+        id: users.id,
+        fullName: users.fullName,
+        trustScore: users.trustScore,
+      },
+      votesReal: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL'), 0)`,
+      votesFake: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE'), 0)`,
+      commentCount: sql<number>`COALESCE((SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id}), 0)`,
+      userVote: viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} LIMIT 1)` : sql`NULL`,
+    };
+  }
+
+  private applyReportJoins(query: any) {
+    return query
+      .leftJoin(categories, eq(reports.categoryId, categories.id))
+      .leftJoin(cities, eq(reports.cityId, cities.id))
+      .leftJoin(areas, eq(reports.areaId, areas.id))
+      .leftJoin(users, eq(reports.reporterId, users.id));
   }
 }
 
