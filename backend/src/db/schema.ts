@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, boolean, pgEnum, varchar, index } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, boolean, pgEnum, varchar, index, real } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const userRoleEnum = pgEnum('user_role', ['USER', 'ADMIN', 'SUPER_ADMIN']);
@@ -208,4 +208,47 @@ export const commentsRelations = relations(comments, ({ one }) => ({
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, { fields: [notifications.userId], references: [users.id] }),
   report: one(reports, { fields: [notifications.reportId], references: [reports.id] }),
+}));
+
+// --- Restaurants ---
+export const restaurants = pgTable('restaurants', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  cuisineType: varchar('cuisine_type', { length: 100 }).notNull().default('General'),
+  address: varchar('address', { length: 500 }),
+  cityId: integer('city_id').references(() => cities.id).notNull(),
+  areaId: integer('area_id').references(() => areas.id).notNull(),
+  avgRating: real('avg_rating').default(0).notNull(),
+  reviewCount: integer('review_count').default(0).notNull(),
+  menu: text('menu'), // JSON string of menu items: [{ name, price, description, category }]
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  cityIdx: index('restaurant_city_idx').on(table.cityId),
+  areaIdx: index('restaurant_area_idx').on(table.areaId),
+}));
+
+// --- Food Reviews ---
+export const foodReviews = pgTable('food_reviews', {
+  id: serial('id').primaryKey(),
+  restaurantId: integer('restaurant_id').references(() => restaurants.id).notNull(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  rating: integer('rating').notNull(), // 1-5
+  title: varchar('title', { length: 255 }).notNull(),
+  body: text('body'),
+  mediaUrls: text('media_urls').array(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  restaurantIdx: index('food_review_restaurant_idx').on(table.restaurantId),
+  userIdx: index('food_review_user_idx').on(table.userId),
+}));
+
+export const restaurantsRelations = relations(restaurants, ({ one, many }) => ({
+  city: one(cities, { fields: [restaurants.cityId], references: [cities.id] }),
+  area: one(areas, { fields: [restaurants.areaId], references: [areas.id] }),
+  reviews: many(foodReviews),
+}));
+
+export const foodReviewsRelations = relations(foodReviews, ({ one }) => ({
+  restaurant: one(restaurants, { fields: [foodReviews.restaurantId], references: [restaurants.id] }),
+  user: one(users, { fields: [foodReviews.userId], references: [users.id] }),
 }));

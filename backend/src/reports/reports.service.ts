@@ -61,6 +61,7 @@ export class ReportsService {
       console.log(`[ReportsService] Inserting report into DB...`);
       const [newReport] = await this.db.insert(reports).values({
         ...reportData,
+        description: reportData.description || '',
         reporterId: userId,
         status: initialStatus,
         urgency: reportData.urgency || 'INFO',
@@ -438,6 +439,84 @@ export class ReportsService {
         this.notificationsService.handleStatusChange(report, 'REMOVED').catch(e => console.error('[ReportsService] Status change notification failed', e));
       }
     }
+  }
+
+  async getSubscribedReports(userId: number, filters?: FilterReportDto) {
+    const userSubscriptions = await this.notificationsService.getSubscriptions(userId);
+    
+    if (userSubscriptions.length === 0) {
+      return []; // No subscriptions, return nothing
+    }
+
+    let query = this.db.select({
+      id: reports.id,
+      title: reports.title,
+      description: reports.description,
+      status: reports.status,
+      urgency: reports.urgency,
+      placeName: reports.placeName,
+      trustScore: reports.trustScore,
+      createdAt: reports.createdAt,
+      autoArchiveAt: reports.autoArchiveAt,
+      categoryId: reports.categoryId,
+      cityId: reports.cityId,
+      areaId: reports.areaId,
+      category: { name: categories.name },
+      city: { name: cities.name },
+      area: { name: areas.name },
+      reporter: {
+        id: users.id,
+        fullName: users.fullName,
+        trustScore: users.trustScore,
+      },
+      votesReal: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL'), 0)`,
+      votesFake: sql<number>`COALESCE((SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE'), 0)`,
+      commentCount: sql<number>`COALESCE((SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id}), 0)`,
+      userVote: filters?.viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${filters.viewerId} LIMIT 1)` : sql`NULL`,
+    })
+    .from(reports)
+    .leftJoin(categories, eq(reports.categoryId, categories.id))
+    .leftJoin(cities, eq(reports.cityId, cities.id))
+    .leftJoin(areas, eq(reports.areaId, areas.id))
+    .leftJoin(users, eq(reports.reporterId, users.id));
+
+    const whereClauses: any[] = [];
+    
+    // Only show PUBLISHED/VERIFIED and non-expired
+    whereClauses.push(sql`${reports.status} IN ('PUBLISHED', 'VERIFIED')`);
+    whereClauses.push(sql`${reports.autoArchiveAt} > NOW()`);
+
+    // Build subscription OR conditions
+    // Each subscription matches by area AND (specific category OR any category)
+    const subscriptionConditions = userSubscriptions.map(sub => {
+      if (sub.categoryId) {
+        return and(eq(reports.areaId, sub.areaId), eq(reports.categoryId, sub.categoryId));
+      } else {
+        return eq(reports.areaId, sub.areaId); // matches any category in this area
+      }
+    });
+
+    whereClauses.push(or(...subscriptionConditions));
+
+    if (whereClauses.length > 0) {
+      query = query.where(and(...whereClauses));
+    }
+
+    query = query.orderBy(desc(reports.createdAt)); // Default order by newest for subscribed reports
+    // can add pagination limit here later
+
+    const results = await query;
+    
+    // Hydrate media
+    const hydrated = await Promise.all(results.map(async (r: any) => {
+      const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
+      return {
+        ...r,
+        media: mediaItems,
+      };
+    }));
+
+    return hydrated;
   }
 
   async expireOldReports() {
