@@ -16,8 +16,9 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { RestaurantsModule } from './restaurants/restaurants.module';
 import { FoodReviewsModule } from './food-reviews/food-reviews.module';
-import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { NestModule, MiddlewareConsumer } from '@nestjs/common';
+import { AdminModule } from './admin/admin.module';
+
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { NestModule, MiddlewareConsumer } from '@nestjs/common';
     NotificationsModule,
     RestaurantsModule,
     FoodReviewsModule,
+    AdminModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',
