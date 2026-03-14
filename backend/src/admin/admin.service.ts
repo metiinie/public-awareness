@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { DRIZZLE_PROVIDER } from '../db/db.module';
 import * as schema from '../db/schema';
 import { eq, count, desc, and, gte, lt } from 'drizzle-orm';
 
@@ -8,8 +9,8 @@ import { eq, count, desc, and, gte, lt } from 'drizzle-orm';
 @Injectable()
 export class AdminService {
   constructor(
-    @Inject('DATABASE_CONNECTION')
-    private db: NodePgDatabase<typeof schema>,
+    @Inject(DRIZZLE_PROVIDER)
+    private db: PostgresJsDatabase<typeof schema>,
   ) {}
 
   async getOverview() {

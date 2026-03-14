@@ -48,7 +48,7 @@ import * as winston from 'winston';
     }),
     ThrottlerModule.forRoot([{
       ttl: 60000,
-      limit: 100,
+      limit: 60, // 60 requests per minute
     }]),
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({

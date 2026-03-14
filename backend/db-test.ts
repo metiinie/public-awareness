@@ -19,7 +19,7 @@ async function main() {
         categoryId: 1,
         cityId: 1,
         areaId: 1,
-        status: 'PUBLISHED',
+        status: 'REPORTED',
         urgency: 'INFO',
         trustScore: 50,
         autoArchiveAt: new Date(Date.now() + 24 * 3600 * 1000),
