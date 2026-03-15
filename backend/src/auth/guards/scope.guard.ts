@@ -74,11 +74,14 @@ export class ScopeGuard implements CanActivate {
     }
 
     if (entityCityId !== null && entityCityId !== adminCityId) {
+      console.error(`[ScopeGuard] Forbidden: entityCityId (${entityCityId}) !== adminCityId (${adminCityId}) for targetId ${targetId} entity ${entity}`);
       throw new ForbiddenException(
         'You do not have permission to act on entities outside your assigned scope.',
       );
     }
 
+    console.log(`[ScopeGuard] Allowed: entityCityId (${entityCityId}) === adminCityId (${adminCityId}) for targetId ${targetId} entity ${entity}`);
     return true;
   }
 }
+

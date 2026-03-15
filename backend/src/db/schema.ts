@@ -259,23 +259,26 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   subscriptions: many(subscriptions),
   comments: many(comments),
   notifications: many(notifications),
-  warnings: many(userWarnings),
-  suspensions: many(userSuspensions),
+  warnings: many(userWarnings, { relationName: 'user_warnings' }),
+  suspensions: many(userSuspensions, { relationName: 'user_suspensions' }),
   sessions: many(adminSessions),
+
   apiKeys: many(apiKeys),
   city: one(cities, { fields: [users.cityId], references: [cities.id] }),
   area: one(areas, { fields: [users.areaId], references: [areas.id] }),
 }));
 
 export const userWarningsRelations = relations(userWarnings, ({ one }) => ({
-  user: one(users, { fields: [userWarnings.userId], references: [users.id] }),
-  admin: one(users, { fields: [userWarnings.adminId], references: [users.id] }),
+  user: one(users, { fields: [userWarnings.userId], references: [users.id], relationName: 'user_warnings' }),
+  admin: one(users, { fields: [userWarnings.adminId], references: [users.id], relationName: 'admin_warnings' }),
 }));
 
+
 export const userSuspensionsRelations = relations(userSuspensions, ({ one }) => ({
-  user: one(users, { fields: [userSuspensions.userId], references: [users.id] }),
-  admin: one(users, { fields: [userSuspensions.adminId], references: [users.id] }),
+  user: one(users, { fields: [userSuspensions.userId], references: [users.id], relationName: 'user_suspensions' }),
+  admin: one(users, { fields: [userSuspensions.adminId], references: [users.id], relationName: 'admin_suspensions' }),
 }));
+
 
 export const reportsRelations = relations(reports, ({ one, many }) => ({
   reporter: one(users, { fields: [reports.reporterId], references: [users.id] }),

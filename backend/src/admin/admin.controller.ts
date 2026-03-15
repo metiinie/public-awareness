@@ -143,6 +143,13 @@ export class AdminController {
     return this.adminService.bulkUpdateStatus(body.ids, body.status, req.user.userId, body.reason);
   }
 
+  @Patch('reports/:id/status')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  updateReportStatus(@Param('id') id: string, @Body('status') status: any, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(+id, status, req.user.userId, reason, this.getIp(req));
+  }
+
+
   @Post('reports/:id/restore')
   @Roles('SUPER_ADMIN')
   restoreReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
