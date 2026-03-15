@@ -19,6 +19,7 @@ import { FoodReviewsModule } from './food-reviews/food-reviews.module';
 import { NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { AdminModule } from './admin/admin.module';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { UsersModule } from './users/users.module';
 
 
 
@@ -70,6 +71,7 @@ import * as winston from 'winston';
     RestaurantsModule,
     FoodReviewsModule,
     AdminModule,
+    UsersModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',
@@ -81,10 +83,6 @@ import * as winston from 'winston';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: RolesGuard,
     },
   ],
 })

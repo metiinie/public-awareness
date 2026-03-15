@@ -21,7 +21,7 @@ async function main() {
         areaId: 1,
         status: 'REPORTED',
         urgency: 'INFO',
-        trustScore: 50,
+        confidenceScore: 50,
         autoArchiveAt: new Date(Date.now() + 24 * 3600 * 1000),
     }).returning();
 

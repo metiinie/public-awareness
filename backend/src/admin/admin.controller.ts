@@ -14,9 +14,19 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
-  @Get('overview')
+  @Get('stats')
   getOverview() {
     return this.adminService.getOverview();
+  }
+
+  @Post('reports/:id/verify')
+  verifyReport(@Param('id') id: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(+id, 'VERIFIED', req.user.userId);
+  }
+
+  @Post('reports/:id/remove')
+  removeReport(@Param('id') id: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(+id, 'REMOVED', req.user.userId);
   }
 
   @Get('reports/critical')
@@ -30,7 +40,6 @@ export class AdminController {
   }
 
   @Get('reports')
-
   getReports(@Query() query: any) {
     return this.adminService.getReports({
       cityId: query.cityId ? +query.cityId : undefined,
@@ -51,8 +60,6 @@ export class AdminController {
   mergeReports(@Param('id') id: string, @Body('duplicateId') duplicateId: number, @Req() req: any) {
     return this.adminService.mergeReports(+id, duplicateId, req.user.userId);
   }
-
-
 
   @Patch('reports/:id/status')
   updateReportStatus(

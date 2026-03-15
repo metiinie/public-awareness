@@ -94,7 +94,7 @@ export class NotificationsService {
             createdAt: notifications.createdAt,
             report: {
                 id: reports.id,
-                trustScore: reports.trustScore,
+                confidenceScore: reports.confidenceScore,
                 area: { name: areas.name },
                 city: { name: cities.name },
             }

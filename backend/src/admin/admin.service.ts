@@ -34,11 +34,11 @@ export class AdminService {
     // Flagged reports (reports with more than 5 FAKE votes, for example)
     // This is a bit complex with current schema without a direct flagged field, 
     // but we can query reports where trustScore is low or FAKE reactions are high.
-    // For now, let's use a placeholder trustScore < 30 as 'Flagged'
+    // For now, let's use a placeholder confidenceScore < 30 as 'Flagged'
     const [flaggedReports] = await this.db
       .select({ value: count() })
       .from(schema.reports)
-      .where(lt(schema.reports.trustScore, 30));
+      .where(lt(schema.reports.confidenceScore, 30));
 
     return {
       totalUsers: userCount.value,
@@ -65,14 +65,14 @@ export class AdminService {
   async getFlaggedReports() {
     // Reports with low trust score
     return this.db.query.reports.findMany({
-      where: lt(schema.reports.trustScore, 30),
+      where: lt(schema.reports.confidenceScore, 30),
       with: {
         reporter: true,
         city: true,
         area: true,
         reactions: true, // To show fake votes count
       },
-      orderBy: [schema.reports.trustScore],
+      orderBy: [schema.reports.confidenceScore],
       limit: 10,
     });
   }
@@ -91,7 +91,7 @@ export class AdminService {
     if (filters.categoryId) where.push(eq(schema.reports.categoryId, filters.categoryId));
     if (filters.urgency) where.push(eq(schema.reports.urgency, filters.urgency as any));
     if (filters.status) where.push(eq(schema.reports.status, filters.status as any));
-    if (filters.minTrust) where.push(gte(schema.reports.trustScore, filters.minTrust));
+    if (filters.minTrust) where.push(gte(schema.reports.confidenceScore, filters.minTrust));
 
     return this.db.query.reports.findMany({
       where: where.length > 0 ? and(...where) : undefined,

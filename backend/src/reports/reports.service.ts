@@ -57,7 +57,7 @@ export class ReportsService {
         status: initialStatus,
         urgency: reportData.urgency || 'INFO',
         placeName: reportData.placeName || null,
-        trustScore: initialReportTrust,
+        confidenceScore: initialReportTrust,
         autoArchiveAt: autoArchiveAt,
       }).returning();
 
@@ -148,8 +148,8 @@ export class ReportsService {
     const sortOrder = order || 'desc';
 
     switch (sortField) {
-      case 'trustScore':
-        query = query.orderBy(sortOrder === 'desc' ? desc(reports.trustScore) : reports.trustScore);
+      case 'confidenceScore':
+        query = query.orderBy(sortOrder === 'desc' ? desc(reports.confidenceScore) : reports.confidenceScore);
         break;
       case 'urgency':
         // Custom urgency ordering: CRITICAL > WARNING > INFO
@@ -188,7 +188,7 @@ export class ReportsService {
       title: reports.title,
       description: reports.description,
       status: reports.status,
-      trustScore: reports.trustScore,
+      confidenceScore: reports.confidenceScore,
       createdAt: reports.createdAt,
       userVote: reactions.type,
       category: { name: categories.name },
@@ -352,7 +352,7 @@ export class ReportsService {
     const finalConfidence = Math.round(confidenceValue * 100);
 
     await this.db.update(reports)
-      .set({ trustScore: finalConfidence })
+      .set({ confidenceScore: finalConfidence })
       .where(eq(reports.id, reportId));
 
     // --- Trust Score Logic ---
@@ -499,7 +499,7 @@ export class ReportsService {
       status: reports.status,
       urgency: reports.urgency,
       placeName: reports.placeName,
-      trustScore: reports.trustScore,
+      confidenceScore: reports.confidenceScore,
       createdAt: reports.createdAt,
       autoArchiveAt: reports.autoArchiveAt,
       categoryId: reports.categoryId,

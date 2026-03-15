@@ -1,0 +1,8 @@
+[dotenv@17.3.1] injecting env (12) from .env -- tip: ??????  enable debug logging with { debug: true }
+--- Verifying Admin Users ---
+Total users found: 6
+Checking user: admin@civicwatch.com (Role: ADMIN)
+  Password "Admin123!" matches: true
+Checking user: superadmin@civicwatch.com (Role: SUPER_ADMIN)
+  Password "Admin123!" matches: true
+--- Verification Finished ---

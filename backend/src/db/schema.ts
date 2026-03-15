@@ -22,10 +22,14 @@ export const users = pgTable('users', {
   password: text('password').notNull(),
   fullName: varchar('full_name', { length: 255 }).notNull(),
   avatar: text('avatar'),
+  bio: text('bio'),
   role: userRoleEnum('role').default('USER').notNull(),
   trustScore: integer('trust_score').default(50).notNull(),
   status: accountStatusEnum('status').default('ACTIVE').notNull(),
   suspensionUntil: timestamp('suspension_until'),
+  cityId: integer('city_id').references(() => cities.id),
+  areaId: integer('area_id').references(() => areas.id),
+  notificationSettings: text('notification_settings').default('{"critical":true,"warnings":true,"updates":true,"reviews":false}'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -67,7 +71,8 @@ export const reports = pgTable('reports', {
   cityId: integer('city_id').references(() => cities.id).notNull(),
   areaId: integer('area_id').references(() => areas.id).notNull(),
   placeName: varchar('place_name', { length: 255 }),
-  trustScore: integer('trust_score').default(50).notNull(), // Initial score for report
+  confidenceScore: integer('confidence_score').default(50).notNull(), // Rename from trust_score
+  mediaUrl: text('media_url'), // Direct access to primary evidence
   createdAt: timestamp('created_at').defaultNow().notNull(),
   autoArchiveAt: timestamp('auto_archive_at'),
 }, (table) => {
@@ -76,7 +81,7 @@ export const reports = pgTable('reports', {
     cityIdx: index('city_idx').on(table.cityId),
     areaIdx: index('area_idx').on(table.areaId),
     statusIdx: index('status_idx').on(table.status),
-    confidenceIdx: index('confidence_idx').on(table.trustScore),
+    confidenceIdx: index('confidence_idx').on(table.confidenceScore),
     createdIdx: index('created_idx').on(table.createdAt),
     urgencyIdx: index('urgency_idx').on(table.urgency),
   };

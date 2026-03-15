@@ -38,7 +38,11 @@ async function seedAdmin() {
       });
       console.log('Default admin created.');
     } else {
-      console.log('Admin user already exists.');
+      console.log('Admin user already exists. Updating password...');
+      await db.update(schema.users)
+        .set({ password: hashedPassword, status: 'ACTIVE' })
+        .where(eq(schema.users.email, adminEmail));
+      console.log('Admin password updated.');
     }
 
     // Attempt SUPER_ADMIN
@@ -59,6 +63,12 @@ async function seedAdmin() {
         } catch (e: any) {
             console.error('Failed to create SUPER_ADMIN. Role might not exist in current DB schema:', e.message);
         }
+    } else {
+        console.log('Super Admin already exists. Updating password...');
+        await db.update(schema.users)
+          .set({ password: hashedPassword, role: 'SUPER_ADMIN', status: 'ACTIVE' })
+          .where(eq(schema.users.email, superAdminEmail));
+        console.log('Super Admin password updated.');
     }
 
     // Audit logs

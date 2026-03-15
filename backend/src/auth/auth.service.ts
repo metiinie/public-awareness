@@ -1,4 +1,5 @@
-import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Inject, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { eq, sql } from 'drizzle-orm';
@@ -11,7 +12,10 @@ export class AuthService {
   constructor(
     @Inject(DRIZZLE_PROVIDER) private db: any,
     private jwtService: JwtService,
-  ) { }
+    private configService: ConfigService,
+  ) {
+    console.log('[AuthService] Initialized with secret length:', this.configService.get('JWT_SECRET')?.length || 0);
+  }
 
   async getProfile(userId: number) {
     const [user] = await this.db.select({
