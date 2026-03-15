@@ -329,8 +329,19 @@ export class ReportsService {
 
     const reportVotes = await this.db.select().from(reactions).where(eq(reactions.reportId, reportId));
 
-    // --- Confidence Score Logic ---
-    // confidence = (vote_ratio * 0.5) + (reporter_trust * 0.3) + (age_decay * 0.2)
+    // --- Dynamic Confidence Score Logic ---
+    // Default weights
+    let weights = { voteWeight: 0.5, reporterTrustWeight: 0.3, ageDecayRate: 0.2 };
+    
+    try {
+      const [configRow] = await this.db.select().from(sql`system_settings`).where(sql`key = 'trust_config'`).limit(1);
+      if (configRow?.value) {
+        const customWeights = JSON.parse(configRow.value);
+        weights = { ...weights, ...customWeights };
+      }
+    } catch (e) {
+      console.error('[ReportsService] Failed to fetch trust weights, using defaults', e);
+    }
 
     // 1. Vote Ratio
     const realVotes = reportVotes.filter((r: any) => r.type === 'REAL').length;
@@ -348,7 +359,9 @@ export class ReportsService {
     const ageElapsed = now.getTime() - createdAt.getTime();
     const ageDecay = Math.max(0, 1 - (ageElapsed / totalLifeSpan));
 
-    const confidenceValue = (voteRatio * 0.5) + (reporterTrust * 0.3) + (ageDecay * 0.2);
+    const confidenceValue = (voteRatio * weights.voteWeight) + 
+                          (reporterTrust * weights.reporterTrustWeight) + 
+                          (ageDecay * weights.ageDecayRate);
     const finalConfidence = Math.round(confidenceValue * 100);
 
     await this.db.update(reports)

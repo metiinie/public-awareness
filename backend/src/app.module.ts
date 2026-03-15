@@ -20,6 +20,7 @@ import { NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { AdminModule } from './admin/admin.module';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { UsersModule } from './users/users.module';
+import { EmergencyModeGuard } from './auth/guards/emergency-mode.guard';
 
 
 
@@ -83,6 +84,10 @@ import * as winston from 'winston';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: EmergencyModeGuard,
     },
   ],
 })

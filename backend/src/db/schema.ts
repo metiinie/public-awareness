@@ -32,6 +32,30 @@ export const users = pgTable('users', {
   notificationSettings: text('notification_settings').default('{"critical":true,"warnings":true,"updates":true,"reviews":false}'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  appealReceived: boolean('appeal_received').default(false).notNull(),
+  appealReason: text('appeal_reason'),
+  mfaEnabled: boolean('mfa_enabled').default(false).notNull(),
+  mfaSecret: text('mfa_secret'),
+  moderationPreferences: text('moderation_preferences').default('{"autoOpenCritical":true,"confidenceThreshold":30,"showDuplicateSuggestions":true,"defaultFilter":"assigned_areas"}'),
+});
+
+// --- User Moderation ---
+export const userWarnings = pgTable('user_warnings', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  reason: text('reason').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const userSuspensions = pgTable('user_suspensions', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  reason: text('reason').notNull(),
+  durationDays: integer('duration_days').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 
@@ -56,6 +80,9 @@ export const areas = pgTable('areas', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 100 }).notNull(),
   cityId: integer('city_id').references(() => cities.id).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  mergedToId: integer('merged_to_id'), // Self-referencing FK for merged areas
+  aliases: text('aliases').array(), // Array of old names
 });
 
 // --- Reports ---
@@ -108,7 +135,33 @@ export const adminActions = pgTable('admin_actions', {
   targetId: integer('target_id'),
   reason: text('reason').notNull(),
   beforeJson: text('before_json'), // Snapshot before action
-  afterJson: text('after_json'),  // Snapshot after action
+  afterJson: text('after_json'),   // Snapshot after action
+  ip: varchar('ip', { length: 45 }), // IPv4 or IPv6
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// --- Admin Sessions ---
+export const adminSessions = pgTable('admin_sessions', {
+  id: serial('id').primaryKey(),
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  token: text('token').notNull(), // Partially hashed or identifier
+  device: varchar('device', { length: 255 }),
+  ip: varchar('ip', { length: 45 }),
+  lastActive: timestamp('last_active').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  isRevoked: boolean('is_revoked').default(false).notNull(),
+});
+
+// --- API Keys ---
+export const apiKeys = pgTable('api_keys', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 100 }).notNull(),
+  keyHash: text('key_hash').notNull().unique(),
+  prefix: varchar('prefix', { length: 8 }).notNull(), // first 8 chars for identification
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  permissions: text('permissions').array(), // ['READ_REPORTS', 'EXPORT_DATA', etc.]
+  lastUsedAt: timestamp('last_used_at'),
+  expiresAt: timestamp('expires_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -161,6 +214,7 @@ export const auditLogs = pgTable('audit_logs', {
   action: varchar('action', { length: 100 }).notNull(), // REMOVE_REPORT, BAN_USER, VERIFY_REPORT, etc.
   reason: text('reason').notNull(),
   targetId: integer('target_id'), // Multi-purpose ID (reportId, userId, etc.)
+  ip: varchar('ip', { length: 45 }), // IPv4 or IPv6
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -192,12 +246,35 @@ export const notifications = pgTable('notifications', {
   };
 });
 
+// --- System Settings ---
+export const systemSettings = pgTable('system_settings', {
+  key: varchar('key', { length: 100 }).primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // --- Relations ---
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
   reports: many(reports),
   subscriptions: many(subscriptions),
   comments: many(comments),
   notifications: many(notifications),
+  warnings: many(userWarnings),
+  suspensions: many(userSuspensions),
+  sessions: many(adminSessions),
+  apiKeys: many(apiKeys),
+  city: one(cities, { fields: [users.cityId], references: [cities.id] }),
+  area: one(areas, { fields: [users.areaId], references: [areas.id] }),
+}));
+
+export const userWarningsRelations = relations(userWarnings, ({ one }) => ({
+  user: one(users, { fields: [userWarnings.userId], references: [users.id] }),
+  admin: one(users, { fields: [userWarnings.adminId], references: [users.id] }),
+}));
+
+export const userSuspensionsRelations = relations(userSuspensions, ({ one }) => ({
+  user: one(users, { fields: [userSuspensions.userId], references: [users.id] }),
+  admin: one(users, { fields: [userSuspensions.adminId], references: [users.id] }),
 }));
 
 export const reportsRelations = relations(reports, ({ one, many }) => ({
@@ -223,12 +300,25 @@ export const adminActionsRelations = relations(adminActions, ({ one }) => ({
   admin: one(users, { fields: [adminActions.adminId], references: [users.id] }),
 }));
 
+export const adminSessionsRelations = relations(adminSessions, ({ one }) => ({
+  admin: one(users, { fields: [adminSessions.adminId], references: [users.id] }),
+}));
+
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  admin: one(users, { fields: [apiKeys.adminId], references: [users.id] }),
+}));
+
 export const categoriesRelations = relations(categories, ({ many }) => ({
   reports: many(reports),
   subscriptions: many(subscriptions),
 }));
 
-export const citiesRelations = relations(cities, ({ many }) => ({
+export const countriesRelations = relations(countries, ({ many }) => ({
+  cities: many(cities),
+}));
+
+export const citiesRelations = relations(cities, ({ one, many }) => ({
+  country: one(countries, { fields: [cities.countryId], references: [countries.id] }),
   areas: many(areas),
   reports: many(reports),
 }));
@@ -262,6 +352,15 @@ export const commentsRelations = relations(comments, ({ one }) => ({
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, { fields: [notifications.userId], references: [users.id] }),
   report: one(reports, { fields: [notifications.reportId], references: [reports.id] }),
+}));
+
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  admin: one(users, { fields: [auditLogs.adminId], references: [users.id] }),
+}));
+
+export const moderationReportsRelations = relations(moderationReports, ({ one }) => ({
+  report: one(reports, { fields: [moderationReports.reportId], references: [reports.id] }),
+  reporter: one(users, { fields: [moderationReports.reporterId], references: [users.id] }),
 }));
 
 // --- Restaurants ---
