@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Patch, Param, Body, Post, Query, Req } from '@nestjs/common';
+import { Controller, Get, UseGuards, Patch, Param, Body, Post, Query, Req, Header } from '@nestjs/common';
 import { Request } from 'express';
 
 
@@ -9,137 +9,204 @@ import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  @Get('system-status')
+  @Roles('SUPER_ADMIN')
+  getSystemStatus() {
+    return this.adminService.getSystemStatus();
+  }
+
+  @Post('emergency-mode')
+  @Roles('SUPER_ADMIN')
+  toggleEmergencyMode(@Body() body: { enabled: boolean; reason: string }, @Req() req: any) {
+    return this.adminService.logAction(req.user.userId, 'EMERGENCY_MODE_TOGGLE', body.reason, body.enabled ? 1 : 0);
+  }
+
+  private getScope(user: any): { cityId?: number; areaId?: number } | undefined {
+    if (user.role === 'SUPER_ADMIN') return undefined; // Global access
+    return {
+      cityId: user.cityId,
+      areaId: user.areaId,
+    };
+  }
+
   @Get('stats')
-  getOverview() {
-    return this.adminService.getOverview();
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getOverview(@Req() req: any) {
+    return this.adminService.getOverview(this.getScope(req.user));
   }
 
   @Post('reports/:id/verify')
-  verifyReport(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.updateReportStatus(+id, 'VERIFIED', req.user.userId);
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  verifyReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(+id, 'VERIFIED', req.user.userId, reason);
   }
 
   @Post('reports/:id/remove')
-  removeReport(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.updateReportStatus(+id, 'REMOVED', req.user.userId);
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  removeReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(+id, 'REMOVED', req.user.userId, reason);
   }
 
   @Get('reports/critical')
-  getCriticalReports() {
-    return this.adminService.getCriticalReports();
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getCriticalReports(@Req() req: any) {
+    return this.adminService.getCriticalReports(this.getScope(req));
   }
 
   @Get('reports/flagged')
-  getFlaggedReports() {
-    return this.adminService.getFlaggedReports();
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getFlaggedReports(@Req() req: any) {
+    return this.adminService.getFlaggedReports(this.getScope(req));
   }
 
   @Get('reports')
-  getReports(@Query() query: any) {
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getReports(@Query() query: any, @Req() req: any) {
     return this.adminService.getReports({
       cityId: query.cityId ? +query.cityId : undefined,
       areaId: query.areaId ? +query.areaId : undefined,
       categoryId: query.categoryId ? +query.categoryId : undefined,
       urgency: query.urgency,
       status: query.status,
-      minTrust: query.minTrust ? +query.minTrust : undefined,
-    });
+      minConfidence: query.minConfidence ? +query.minConfidence : undefined,
+      maxConfidence: query.maxConfidence ? +query.maxConfidence : undefined,
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+      id: query.id ? +query.id : undefined,
+    }, this.getScope(req));
+  }
+
+  @Get('reports/export')
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="reports_export.csv"')
+  @Roles('SUPER_ADMIN')
+  exportReports(@Query() query: any, @Req() req: any) {
+    return this.adminService.exportReports({
+      cityId: query.cityId ? +query.cityId : undefined,
+      areaId: query.areaId ? +query.areaId : undefined,
+      categoryId: query.categoryId ? +query.categoryId : undefined,
+      urgency: query.urgency,
+      status: query.status,
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    }, this.getScope(req));
   }
 
   @Post('reports/:id/archive')
-  archiveReport(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.archiveReport(+id, req.user.userId);
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  archiveReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.archiveReport(+id, req.user.userId, reason);
   }
 
   @Post('reports/:id/merge')
-  mergeReports(@Param('id') id: string, @Body('duplicateId') duplicateId: number, @Req() req: any) {
-    return this.adminService.mergeReports(+id, duplicateId, req.user.userId);
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  mergeReports(@Param('id') id: string, @Body('mergedIds') mergedIds: number[], @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.mergeReports(+id, mergedIds, req.user.userId, reason);
   }
 
-  @Patch('reports/:id/status')
-  updateReportStatus(
-    @Param('id') id: string,
-    @Body('status') status: 'VERIFIED' | 'REMOVED' | 'REPORTED' | 'UNDER_REVIEW' | 'RESOLVED' | 'ARCHIVED',
-    @Req() req: any
-  ) {
-    return this.adminService.updateReportStatus(+id, status, req.user.userId);
+  @Post('reports/bulk-status')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  bulkUpdateStatus(@Body() body: { ids: number[], status: any, reason: string }, @Req() req: any) {
+    return this.adminService.bulkUpdateStatus(body.ids, body.status, req.user.userId, body.reason);
+  }
+
+  @Post('reports/:id/restore')
+  @Roles('SUPER_ADMIN')
+  restoreReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.restoreReport(+id, req.user.userId, reason);
+  }
+
+  @Get('reports/:id/history')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getReportHistory(@Param('id') id: string) {
+    return this.adminService.getReportHistory(+id);
   }
 
 
   @Get('users')
-  getUsers() {
-    return this.adminService.getUsers();
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getUsers(@Req() req: any) {
+    return this.adminService.getUsers(this.getScope(req));
   }
 
   @Patch('users/:id/role')
+  @Roles('SUPER_ADMIN')
   updateUserRole(@Param('id') id: string, @Body('role') role: 'USER' | 'ADMIN' | 'SUPER_ADMIN', @Req() req: any) {
     return this.adminService.updateUserRole(+id, role, req.user.userId);
   }
 
   @Post('users/:id/warn')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   warnUser(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
     return this.adminService.warnUser(+id, reason, req.user.userId);
   }
 
   @Post('users/:id/suspend')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   suspendUser(@Param('id') id: string, @Body('days') days: number, @Body('reason') reason: string, @Req() req: any) {
     return this.adminService.suspendUser(+id, days, reason, req.user.userId);
   }
 
   @Post('users/:id/ban')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   banUser(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
     return this.adminService.banUser(+id, reason, req.user.userId);
   }
 
   @Post('users/:id/reset-trust')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   resetTrustScore(@Param('id') id: string, @Req() req: any) {
     return this.adminService.resetTrustScore(+id, req.user.userId);
   }
 
-
   @Get('locations')
-
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   getLocations() {
     return this.adminService.getLocations();
   }
 
   @Post('locations/cities')
+  @Roles('SUPER_ADMIN')
   createCity(@Body('name') name: string, @Body('countryId') countryId: number, @Req() req: any) {
     return this.adminService.createCity(name, countryId, req.user.userId);
   }
 
   @Post('locations/areas')
+  @Roles('SUPER_ADMIN')
   createArea(@Body('name') name: string, @Body('cityId') cityId: number, @Req() req: any) {
     return this.adminService.createArea(name, cityId, req.user.userId);
   }
 
   @Get('categories')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   getCategories() {
     return this.adminService.getCategories();
   }
 
   @Post('categories')
+  @Roles('SUPER_ADMIN')
   createCategory(@Body('name') name: string, @Req() req: any, @Body('icon') icon?: string) {
     return this.adminService.createCategory(name, req.user.userId, icon);
   }
 
   @Patch('categories/:id')
+  @Roles('SUPER_ADMIN')
   updateCategory(@Param('id') id: string, @Body() data: any, @Req() req: any) {
     return this.adminService.updateCategory(+id, data, req.user.userId);
   }
 
   @Post('broadcast')
+  @Roles('SUPER_ADMIN')
   sendBroadcast(@Body('message') message: string, @Req() req: any, @Body('areaId') areaId?: number) {
     return this.adminService.sendBroadcast(message, req.user.userId, areaId);
   }
 
 
   @Get('audit-logs')
+  @Roles('SUPER_ADMIN')
   getAuditLogs() {
     return this.adminService.getAuditLogs();
   }

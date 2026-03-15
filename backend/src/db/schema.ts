@@ -73,7 +73,9 @@ export const reports = pgTable('reports', {
   placeName: varchar('place_name', { length: 255 }),
   confidenceScore: integer('confidence_score').default(50).notNull(), // Rename from trust_score
   mediaUrl: text('media_url'), // Direct access to primary evidence
+  masterReportId: integer('master_report_id'), // Self-reference for merging
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
   autoArchiveAt: timestamp('auto_archive_at'),
 }, (table) => {
   return {
@@ -84,10 +86,34 @@ export const reports = pgTable('reports', {
     confidenceIdx: index('confidence_idx').on(table.confidenceScore),
     createdIdx: index('created_idx').on(table.createdAt),
     urgencyIdx: index('urgency_idx').on(table.urgency),
+    masterReportIdx: index('master_report_idx').on(table.masterReportId),
   };
 });
 
+// --- Moderation Notes ---
+export const moderationNotes = pgTable('moderation_notes', {
+  id: serial('id').primaryKey(),
+  reportId: integer('report_id').references(() => reports.id).notNull(),
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// --- Detailed Admin Actions ---
+export const adminActions = pgTable('admin_actions', {
+  id: serial('id').primaryKey(),
+  adminId: integer('admin_id').references(() => users.id).notNull(),
+  action: varchar('action', { length: 100 }).notNull(),
+  targetType: varchar('target_type', { length: 50 }).notNull(), // 'REPORT', 'USER', 'SYSTEM'
+  targetId: integer('target_id'),
+  reason: text('reason').notNull(),
+  beforeJson: text('before_json'), // Snapshot before action
+  afterJson: text('after_json'),  // Snapshot after action
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // --- Media ---
+// ... existing media table ...
 export const media = pgTable('media', {
   id: serial('id').primaryKey(),
   reportId: integer('report_id').references(() => reports.id).notNull(),
@@ -179,10 +205,22 @@ export const reportsRelations = relations(reports, ({ one, many }) => ({
   category: one(categories, { fields: [reports.categoryId], references: [categories.id] }),
   city: one(cities, { fields: [reports.cityId], references: [cities.id] }),
   area: one(areas, { fields: [reports.areaId], references: [areas.id] }),
+  masterReport: one(reports, { fields: [reports.masterReportId], references: [reports.id], relationName: 'merged_reports' }),
+  mergedReports: many(reports, { relationName: 'merged_reports' }),
+  moderationNotes: many(moderationNotes),
   media: many(media),
   reactions: many(reactions),
   comments: many(comments),
   notifications: many(notifications),
+}));
+
+export const moderationNotesRelations = relations(moderationNotes, ({ one }) => ({
+  report: one(reports, { fields: [moderationNotes.reportId], references: [reports.id] }),
+  admin: one(users, { fields: [moderationNotes.adminId], references: [users.id] }),
+}));
+
+export const adminActionsRelations = relations(adminActions, ({ one }) => ({
+  admin: one(users, { fields: [adminActions.adminId], references: [users.id] }),
 }));
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
