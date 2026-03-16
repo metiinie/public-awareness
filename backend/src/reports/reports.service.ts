@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { reports, media, reactions, users, categories, areas, cities, comments } from '../db/schema';
+import { reports, media, reactions, users, categories, areas, cities, comments, moderationReports } from '../db/schema';
 import { eq, and, or, desc, sql, SQL, lte, ne } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -502,6 +502,52 @@ export class ReportsService {
     .where(eq(comments.id, comment.id));
 
     return fullComment;
+  }
+
+  async flagReport(reportId: number, reporterId: number, reason: string) {
+    if (!reason || reason.trim().length === 0) {
+      throw new BadRequestException('Reason is required to flag a report');
+    }
+
+    // Check if the report exists
+    const [report] = await this.db.select().from(reports).where(eq(reports.id, reportId)).limit(1);
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+
+    const [flag] = await this.db.insert(moderationReports).values({
+      reportId: reportId,
+      reporterId: reporterId,
+      reason: reason,
+      status: 'PENDING'
+    }).returning();
+
+    return flag;
+  }
+
+  async flagComment(reportId: number, commentId: number, reporterId: number, reason: string) {
+    if (!reason || reason.trim().length === 0) {
+      throw new BadRequestException('Reason is required to flag a comment');
+    }
+
+    // Check if the comment exists and belongs to the report
+    const [comment] = await this.db.select().from(comments).where(
+      and(eq(comments.id, commentId), eq(comments.reportId, reportId))
+    ).limit(1);
+    
+    if (!comment) {
+      throw new NotFoundException('Comment not found on this report');
+    }
+
+    const [flag] = await this.db.insert(moderationReports).values({
+      reportId: reportId,
+      commentId: commentId,
+      reporterId: reporterId,
+      reason: reason,
+      status: 'PENDING'
+    }).returning();
+
+    return flag;
   }
 
   private getReportSelect(viewerId?: number) {

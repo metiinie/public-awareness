@@ -1,5 +1,5 @@
-export type UserRole = 'USER' | 'ADMIN' | 'SUPER_ADMIN';
-export type ReportStatus = 'PENDING' | 'VERIFIED' | 'SOLVED' | 'ARCHIVED' | 'REJECTED';
+export type UserRole = 'USER' | 'ADMIN' | 'MODERATOR' | 'SUPER_ADMIN';
+export type ReportStatus = 'REPORTED' | 'UNDER_REVIEW' | 'REMOVED' | 'VERIFIED' | 'RESOLVED' | 'ARCHIVED';
 export type MediaType = 'IMAGE' | 'VIDEO';
 export type ReactionType = 'REAL' | 'FAKE';
 

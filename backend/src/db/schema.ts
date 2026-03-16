@@ -201,6 +201,7 @@ export const subscriptions = pgTable('subscriptions', {
 export const moderationReports = pgTable('moderation_reports', {
   id: serial('id').primaryKey(),
   reportId: integer('report_id').references(() => reports.id).notNull(),
+  commentId: integer('comment_id').references(() => comments.id), // Optional: present only if flagging a specific comment
   reason: text('reason').notNull(),
   reporterId: integer('reporter_id').references(() => users.id).notNull(),
   status: varchar('status', { length: 50 }).default('PENDING').notNull(), // PENDING, RESOLVED, DISMISSED

@@ -73,4 +73,20 @@ export class ReportsController {
   postComment(@Param('id') id: string, @Body('content') content: string, @Request() req) {
     return this.reportsService.createComment(+id, req.user.userId, content);
   }
+
+  @Post(':id/flag')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Flag a report for moderation' })
+  flagReport(@Param('id') id: string, @Body('reason') reason: string, @Request() req) {
+    return this.reportsService.flagReport(+id, req.user.userId, reason);
+  }
+
+  @Post(':id/comments/:commentId/flag')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Flag a comment for moderation' })
+  flagComment(@Param('id') id: string, @Param('commentId') commentId: string, @Body('reason') reason: string, @Request() req) {
+    return this.reportsService.flagComment(+id, +commentId, req.user.userId, reason);
+  }
 }
