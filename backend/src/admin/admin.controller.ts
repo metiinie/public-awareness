@@ -494,10 +494,55 @@ export class AdminController {
     return this.adminService.updateUrgencyColors(req.user.userId, colors);
   }
 
-  @Post('system-settings/maintenance')
-  @Roles('SUPER_ADMIN')
-  toggleMaintenanceMode(@Body('enabled') enabled: boolean, @Req() req: any) {
-    return this.adminService.toggleMaintenanceMode(req.user.userId, enabled);
+
+  // --- Restaurant & Food Review Management ---
+  @Get('restaurants')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getRestaurants(@Query() query: any, @Req() req: any) {
+    return this.adminService.getRestaurantsForAdmin({
+      cityId: query.cityId ? +query.cityId : undefined,
+      areaId: query.areaId ? +query.areaId : undefined,
+      cuisineType: query.cuisineType,
+      search: query.search,
+    }, this.getScope(req.user));
+  }
+
+  @Post('restaurants')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  createRestaurant(@Body() data: any, @Req() req: any) {
+    return this.adminService.createRestaurant(data, req.user.userId);
+  }
+
+  @Patch('restaurants/:id')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  updateRestaurant(@Param('id') id: string, @Body() data: any, @Req() req: any) {
+    return this.adminService.updateRestaurant(+id, data, req.user.userId);
+  }
+
+  @Delete('restaurants/:id')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  deleteRestaurant(@Param('id') id: string, @Req() req: any) {
+    return this.adminService.deleteRestaurant(+id, req.user.userId);
+  }
+
+  @Get('food-reviews')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  getFoodReviews(@Query() query: any, @Req() req: any) {
+    return this.adminService.getFoodReviewsForAdmin({
+      restaurantId: query.restaurantId ? +query.restaurantId : undefined,
+      cityId: query.cityId ? +query.cityId : undefined,
+      areaId: query.areaId ? +query.areaId : undefined,
+      userId: query.userId ? +query.userId : undefined,
+      minRating: query.minRating ? +query.minRating : undefined,
+      maxRating: query.maxRating ? +query.maxRating : undefined,
+      search: query.search,
+    }, this.getScope(req.user));
+  }
+
+  @Delete('food-reviews/:id')
+  @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  deleteFoodReview(@Param('id') id: string, @Req() req: any) {
+    return this.adminService.deleteFoodReview(+id, req.user.userId);
   }
 }
 

@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import * as schema from '../db/schema';
-import { eq, count, desc, and, or, gte, lt, ne, lte, inArray, ilike, sql } from 'drizzle-orm';
+import { eq, count, desc, and, or, gte, lt, ne, lte, inArray, ilike, sql, avg } from 'drizzle-orm';
 
 
 @Injectable()
@@ -927,7 +927,7 @@ export class AdminService {
       apiLatency: '42ms',
       errorRate: '0.01%',
       workerBacklog: 12,
-      s3Usage: '1.2GB',
+      storageUsage: '1.2GB',
       isEmergencyMode: emergencyMode?.value === 'true',
     };
   }
@@ -1115,7 +1115,7 @@ export class AdminService {
     // Note: This would typically trigger an invite email and password setup
     const [newAdmin] = await this.db.insert(schema.users).values({
       ...data,
-      password: 'TEMPORARY_PASSWORD_CHANGE_ME', // Should be handled by invite flow
+      password: 'DEFERRED_PASSWORD_SETUP_REQUIRED', // Should be handled by invite flow
       status: 'ACTIVE',
     }).returning();
 
@@ -1127,6 +1127,155 @@ export class AdminService {
     // This allows an admin to temporarily change their operational context
     // In a real app, this might be session-only, but for focus consistency we can update the user record
     return this.db.update(schema.users).set({ cityId, areaId }).where(eq(schema.users.id, adminId)).returning();
+  }
+
+
+  // --- Restaurant & Food Review Management ---
+  async getRestaurantsForAdmin(filters: { 
+    areaId?: number; 
+    cityId?: number; 
+    cuisineType?: string; 
+    search?: string 
+  }, scope?: { cityId?: number; areaId?: number }) {
+    const where: any[] = [];
+    
+    const finalCityId = scope?.cityId || filters.cityId;
+    const finalAreaId = scope?.areaId || filters.areaId;
+
+    if (finalCityId) where.push(eq(schema.restaurants.cityId, finalCityId));
+    if (finalAreaId) where.push(eq(schema.restaurants.areaId, finalAreaId));
+    if (filters.cuisineType && filters.cuisineType !== 'all') {
+      where.push(ilike(schema.restaurants.cuisineType, `%${filters.cuisineType}%`));
+    }
+    if (filters.search) {
+      where.push(ilike(schema.restaurants.name, `%${filters.search}%`));
+    }
+
+    return this.db.query.restaurants.findMany({
+      where: where.length > 0 ? and(...where) : undefined,
+      with: {
+        city: true,
+        area: true,
+        reviews: {
+          limit: 5,
+          orderBy: [desc(schema.foodReviews.createdAt)]
+        }
+      },
+      orderBy: [schema.restaurants.name]
+    });
+  }
+
+  async createRestaurant(data: any, adminId: number) {
+    const result = await this.db.insert(schema.restaurants).values({
+      ...data,
+      avgRating: 0,
+      reviewCount: 0,
+    }).returning();
+    
+    await this.logAction(adminId, 'CREATE_RESTAURANT', `Created restaurant: ${data.name}`, result[0].id);
+    return result[0];
+  }
+
+  async updateRestaurant(id: number, data: any, adminId: number) {
+    const result = await this.db.update(schema.restaurants)
+      .set(data)
+      .where(eq(schema.restaurants.id, id))
+      .returning();
+      
+    await this.logAction(adminId, 'UPDATE_RESTAURANT', `Updated restaurant #${id}`, id);
+    return result[0];
+  }
+
+  async deleteRestaurant(id: number, adminId: number) {
+    // First delete associated reviews or handle them? 
+    // Usually restaurants have reviews. The foreign key should handle this if Cascade is set, 
+    // but Drizzle/Postgres might need explicit handling if not.
+    // In schema.ts, it's .references(() => restaurants.id).notNull().
+    
+    // We'll perform a soft deletion or just delete for now as requested.
+    await this.db.delete(schema.foodReviews).where(eq(schema.foodReviews.restaurantId, id));
+    const result = await this.db.delete(schema.restaurants).where(eq(schema.restaurants.id, id)).returning();
+    
+    await this.logAction(adminId, 'DELETE_RESTAURANT', `Deleted restaurant #${id}`, id);
+    return result[0];
+  }
+
+  async getFoodReviewsForAdmin(filters: {
+    restaurantId?: number;
+    cityId?: number;
+    areaId?: number;
+    userId?: number;
+    minRating?: number;
+    maxRating?: number;
+    search?: string;
+  }, scope?: { cityId?: number; areaId?: number }) {
+    const { foodReviews, restaurants, users } = schema;
+    const where: any[] = [];
+
+    if (filters.restaurantId) where.push(eq(foodReviews.restaurantId, filters.restaurantId));
+    if (filters.userId) where.push(eq(foodReviews.userId, filters.userId));
+    if (filters.minRating) where.push(gte(foodReviews.rating, filters.minRating));
+    if (filters.maxRating) where.push(lte(foodReviews.rating, filters.maxRating));
+    
+    if (filters.search) {
+      where.push(or(
+        ilike(foodReviews.title, `%${filters.search}%`),
+        ilike(foodReviews.body, `%${filters.search}%`)
+      ));
+    }
+
+    // Join with restaurants to enforce scoping
+    const finalCityId = scope?.cityId || filters.cityId;
+    const finalAreaId = scope?.areaId || filters.areaId;
+
+    let subQuery: any = this.db.select({ id: restaurants.id }).from(restaurants);
+    const subWhere: any[] = [];
+    if (finalCityId) subWhere.push(eq(restaurants.cityId, finalCityId));
+    if (finalAreaId) subWhere.push(eq(restaurants.areaId, finalAreaId));
+    
+    if (subWhere.length > 0) {
+      where.push(sql`${foodReviews.restaurantId} IN (${this.db.select({ id: restaurants.id }).from(restaurants).where(and(...subWhere))})`);
+    }
+
+    return this.db.query.foodReviews.findMany({
+      where: where.length > 0 ? and(...where) : undefined,
+      with: {
+        restaurant: true,
+        user: true
+      },
+      orderBy: [desc(foodReviews.createdAt)],
+      limit: 100
+    });
+  }
+
+  async deleteFoodReview(id: number, adminId: number) {
+    const review = await this.db.query.foodReviews.findFirst({
+      where: eq(schema.foodReviews.id, id)
+    });
+    if (!review) throw new Error('Review not found');
+
+    const result = await this.db.delete(schema.foodReviews).where(eq(schema.foodReviews.id, id)).returning();
+    
+    // Recalculate restaurant stats
+    const restaurantId = review.restaurantId;
+    const stats = await this.db
+      .select({
+        avgRating: avg(schema.foodReviews.rating),
+        reviewCount: count(schema.foodReviews.id),
+      })
+      .from(schema.foodReviews)
+      .where(eq(schema.foodReviews.restaurantId, restaurantId));
+
+    await this.db
+      .update(schema.restaurants)
+      .set({
+        avgRating: parseFloat(stats[0].avgRating ?? '0'),
+        reviewCount: Number(stats[0].reviewCount),
+      })
+      .where(eq(schema.restaurants.id, restaurantId));
+
+    await this.logAction(adminId, 'DELETE_FOOD_REVIEW', `Deleted review #${id} by user #${review.userId}`, id);
+    return result[0];
   }
 
   async logDeepAction(

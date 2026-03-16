@@ -19,7 +19,11 @@ async function seedAdmin() {
   console.log('--- Starting Admin Seeding ---');
 
   try {
-    const hashedPassword = await bcrypt.hash('Admin123!', 10);
+    const seedPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
+    if (!process.env.SEED_ADMIN_PASSWORD) {
+        console.warn('WARNING: SEED_ADMIN_PASSWORD not set, using default development password.');
+    }
+    const hashedPassword = await bcrypt.hash(seedPassword, 10);
     console.log('Password hashed successfully.');
 
     const adminEmail = 'admin@civicwatch.com';

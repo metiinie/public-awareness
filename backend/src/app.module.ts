@@ -21,6 +21,7 @@ import { AdminModule } from './admin/admin.module';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { UsersModule } from './users/users.module';
 import { EmergencyModeGuard } from './auth/guards/emergency-mode.guard';
+import { RedisModule } from './redis/redis.module';
 
 
 
@@ -32,37 +33,42 @@ import * as winston from 'winston';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    WinstonModule.forRoot({
-      transports: [
-        new winston.transports.Console({
-          format: winston.format.combine(
-            winston.format.timestamp(),
-            winston.format.colorize(),
-            winston.format.simple(),
-          ),
-        }),
-        new winston.transports.File({
-          filename: 'logs/error.log',
-          level: 'error',
-        }),
-        new winston.transports.File({ filename: 'logs/combined.log' }),
-      ],
+    WinstonModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const isProd = config.get('NODE_ENV') === 'production';
+        const transports: winston.transport[] = [
+          new winston.transports.Console({
+            format: isProd 
+              ? winston.format.json()
+              : winston.format.combine(
+                  winston.format.timestamp(),
+                  winston.format.colorize(),
+                  winston.format.simple(),
+                ),
+          }),
+        ];
+
+        if (!isProd) {
+          transports.push(
+            new winston.transports.File({
+              filename: 'logs/error.log',
+              level: 'error',
+            }),
+            new winston.transports.File({ filename: 'logs/combined.log' }),
+          );
+        }
+
+        return { transports };
+      },
     }),
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 60, // 60 requests per minute
     }]),
     ScheduleModule.forRoot(),
-    BullModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.get('REDIS_HOST'),
-          port: config.get('REDIS_PORT'),
-        },
-      }),
-    }),
+    RedisModule,
     DbModule,
     AuthModule,
     ReportsModule,

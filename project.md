@@ -50,7 +50,7 @@ CivicWatch is a comprehensive full-stack mobile application designed to empower 
 *   **ORM**: Drizzle ORM
 *   **Database**: PostgreSQL
 *   **Caching & Background Jobs**: Redis
-*   **Storage**: AWS S3 (or compatible) for media uploads
+*   **Storage**: Cloudinary for media uploads
 
 ### **DevOps & Environment**
 *   **Deployment**: Docker Compose for local infrastructure (PostgreSQL, Redis).
