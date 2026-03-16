@@ -38,7 +38,7 @@ export class ReportsService {
       (reportData.description || '').toLowerCase().includes(word)
     );
 
-    let initialStatus = 'PUBLISHED';
+    let initialStatus = 'REPORTED';
     if (reportData.urgency === 'CRITICAL' || userTrust < 20 || hasProfanity) {
       initialStatus = 'UNDER_REVIEW';
     }
@@ -117,7 +117,7 @@ export class ReportsService {
       const globalVisibility = and(
         ne(reports.status, 'REMOVED'),
         or(
-          sql`${reports.status} IN ('PUBLISHED', 'VERIFIED') AND ${reports.autoArchiveAt} > NOW()`,
+          sql`${reports.status} IN ('REPORTED', 'VERIFIED') AND ${reports.autoArchiveAt} > NOW()`,
           filters.viewerId ? eq(reports.reporterId, filters.viewerId) : sql`FALSE`
         )
       );
@@ -432,7 +432,7 @@ export class ReportsService {
     const visibilityConditions = and(
       ne(reports.status, 'REMOVED'),
       or(
-        sql`${reports.status} IN ('PUBLISHED', 'VERIFIED') AND ${reports.autoArchiveAt} > NOW()`,
+        sql`${reports.status} IN ('REPORTED', 'VERIFIED') AND ${reports.autoArchiveAt} > NOW()`,
         eq(reports.urgency, 'CRITICAL'),
         filters?.viewerId ? eq(reports.reporterId, filters.viewerId) : sql`FALSE`
       )
