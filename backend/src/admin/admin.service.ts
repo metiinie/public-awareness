@@ -5,6 +5,8 @@ import * as schema from '../db/schema';
 import { eq, count, desc, and, or, gte, lt, ne, lte, inArray, ilike, sql, avg } from 'drizzle-orm';
 
 
+import { NotificationsService } from '../notifications/notifications.service';
+
 @Injectable()
 export class AdminService {
   private readonly logger = new Logger(AdminService.name);
@@ -12,6 +14,7 @@ export class AdminService {
   constructor(
     @Inject(DRIZZLE_PROVIDER)
     private db: PostgresJsDatabase<typeof schema>,
+    private notificationsService: NotificationsService,
   ) {}
 
   async getOverview(scope?: { cityId?: number; areaId?: number }) {
@@ -942,6 +945,10 @@ export class AdminService {
       });
 
     await this.logAction(adminId, 'EMERGENCY_MODE_TOGGLE', `${reason} (Enabled: ${enabled})`, enabled ? 1 : 0);
+    
+    // Broadcast to users
+    await this.notificationsService.broadcastSystemEmergency(enabled, reason);
+
     return { success: true, enabled };
   }
 

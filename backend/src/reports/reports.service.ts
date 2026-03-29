@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { reports, media, reactions, users, categories, areas, cities, comments, moderationReports } from '../db/schema';
-import { eq, and, or, desc, sql, SQL, lte, ne } from 'drizzle-orm';
+import { eq, and, or, desc, sql, SQL, lte, ne, lt } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 
@@ -402,7 +402,7 @@ export class ReportsService {
     const userSubscriptions = await this.notificationsService.getSubscriptions(userId);
     
     if (userSubscriptions.length === 0) {
-      return []; // No subscriptions, return nothing
+      return { items: [], nextCursor: undefined }; // No subscriptions, return nothing
     }
 
     let query = this.db.select(this.getReportSelect(filters?.viewerId))
@@ -440,16 +440,28 @@ export class ReportsService {
 
     whereClauses.push(and(subFilter, visibilityConditions));
 
+    // Pagination using cursor
+    const limit = filters?.limit || 20;
+    if (filters?.cursor) {
+      whereClauses.push(lt(reports.id, filters.cursor));
+    }
+
     if (whereClauses.length > 0) {
       query = query.where(and(...whereClauses));
     }
 
-    query = query.orderBy(desc(reports.createdAt)); // Default order by newest for subscribed reports
+    query = query.orderBy(desc(reports.id)).limit(limit + 1); // Fetch one extra to determine if there's a next page
 
     const results = await query;
+    let nextCursor: number | undefined;
+
+    if (results.length > limit) {
+      const nextItem = results.pop(); // Remove the extra item
+      nextCursor = nextItem.id;
+    }
     
     // Hydrate media
-    const hydrated = await Promise.all(results.map(async (r: any) => {
+    const hydratedItems = await Promise.all(results.map(async (r: any) => {
       const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
       return {
         ...r,
@@ -457,7 +469,7 @@ export class ReportsService {
       };
     }));
 
-    return hydrated;
+    return { items: hydratedItems, nextCursor };
   }
 
   async expireOldReports() {

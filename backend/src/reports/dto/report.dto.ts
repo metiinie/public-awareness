@@ -94,4 +94,16 @@ export class FilterReportDto {
   @Type(() => Number)
   @IsInt()
   viewerId?: number;
+
+  @ApiPropertyOptional({ example: 20 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  limit?: number;
+
+  @ApiPropertyOptional({ example: 42 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  cursor?: number;
 }

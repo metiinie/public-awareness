@@ -15,7 +15,7 @@ export class NotificationsService {
         @Inject(DRIZZLE_PROVIDER) private db: any,
         private notificationsGateway: NotificationsGateway
     ) {
-        this.expo = new Expo({ useFcmV1: true });
+        this.expo = new Expo();
     }
 
     // ─── Helper: Send native push to multiple user IDs ────────────────────────
@@ -43,7 +43,7 @@ export class NotificationsService {
                 sound: 'default',
                 title: payload.title,
                 body: payload.body,
-                data: payload.data ?? {},
+                data: (payload.data as Record<string, unknown>) ?? {},
                 priority: 'high',
                 channelId: 'alerts', // Android 8+ notification channel
             });
@@ -87,8 +87,14 @@ export class NotificationsService {
     // ─── Handle new report: notify all subscribed users ───────────────────────
     async handleNewReport(report: any) {
         const matches = await this.db
-            .select()
+            .select({
+                userId: subscriptions.userId,
+                areaId: subscriptions.areaId,
+                categoryId: subscriptions.categoryId,
+                notificationSettings: users.notificationSettings,
+            })
             .from(subscriptions)
+            .innerJoin(users, eq(subscriptions.userId, users.id))
             .where(
                 and(
                     eq(subscriptions.areaId, report.areaId),
@@ -112,26 +118,49 @@ export class NotificationsService {
                     ? `🚨 CRITICAL ALERT: ${report.title} reported in ${report.area?.name || 'your area'}!`
                     : `⚠️ New ${report.category?.name || 'issue'} reported in ${report.area?.name || 'your area'}.`,
                 isRead: false,
+                // temporarily attach settings so we can filter push
+                _settings: sub.notificationSettings
             }));
 
         if (newNotifications.length === 0) return;
 
-        await this.db.insert(notifications).values(newNotifications);
+        // Strip _settings before DB insert
+        const dbNotifs = newNotifications.map(n => {
+            const copy = { ...n };
+            delete copy._settings;
+            return copy;
+        });
 
-        // Real-time WebSocket (for users with the app open)
-        newNotifications.forEach((n: any) => {
+        await this.db.insert(notifications).values(dbNotifs);
+
+        // Real-time WebSocket (for users with the app open - feed gets everything)
+        dbNotifs.forEach((n: any) => {
             this.notificationsGateway.notifyUser(n.userId, n);
         });
 
-        // Native OS push (for users with the app closed/backgrounded)
-        const recipientIds = newNotifications.map((n: any) => n.userId);
-        await this.sendPushToUsers(recipientIds, {
-            title: isCritical ? '🚨 Critical Alert' : '⚠️ New Report',
-            body: isCritical
-                ? `CRITICAL: ${report.title} in ${report.area?.name || 'your area'}`
-                : `New ${report.category?.name || 'report'} in ${report.area?.name || 'your area'}`,
-            data: { reportId: report.id, type: isCritical ? 'CRITICAL_ALERT' : 'NEW_REPORT' },
-        });
+        // Native OS push (OS-level alerts are filtered by user settings)
+        const pushRecipientIds = newNotifications.filter((n: any) => {
+            const settingsStr = n._settings || '{}';
+            const settings = typeof settingsStr === 'string' ? JSON.parse(settingsStr) : settingsStr;
+
+            // Global push toggle
+            if (settings.pushEnabled === false) return false;
+
+            // Critical-only toggle
+            if (settings.criticalOnly === true && report.urgency !== 'CRITICAL') return false;
+
+            return true;
+        }).map(n => n.userId);
+
+        if (pushRecipientIds.length > 0) {
+            await this.sendPushToUsers(pushRecipientIds, {
+                title: isCritical ? '🚨 Critical Alert' : '⚠️ New Report',
+                body: isCritical
+                    ? `CRITICAL: ${report.title} in ${report.area?.name || 'your area'}`
+                    : `New ${report.category?.name || 'report'} in ${report.area?.name || 'your area'}`,
+                data: { reportId: report.id, type: isCritical ? 'CRITICAL_ALERT' : 'NEW_REPORT' },
+            });
+        }
     }
 
     // ─── Handle status change: notify the report's author ────────────────────
@@ -152,6 +181,11 @@ export class NotificationsService {
         const message = messages[newStatus];
         if (!message) return;
 
+        // Fetch user settings
+        const [reporter] = await this.db.select({ notificationSettings: users.notificationSettings }).from(users).where(eq(users.id, report.reporterId));
+        const settingsStr = reporter?.notificationSettings || '{}';
+        const settings = typeof settingsStr === 'string' ? JSON.parse(settingsStr) : settingsStr;
+
         const newNotif = {
             userId: report.reporterId,
             reportId: report.id,
@@ -166,11 +200,61 @@ export class NotificationsService {
         this.notificationsGateway.notifyUser(report.reporterId, newNotif);
 
         // Native OS push
-        await this.sendPushToUsers([report.reporterId], {
-            title: pushTitles[newStatus] || 'Report Update',
-            body: message,
-            data: { reportId: report.id, type: 'STATUS_CHANGE' },
+        if (settings.pushEnabled !== false && settings.statusUpdates !== false) {
+            await this.sendPushToUsers([report.reporterId], {
+                title: pushTitles[newStatus] || 'Report Update',
+                body: message,
+                data: { reportId: report.id, type: 'STATUS_CHANGE' },
+            });
+        }
+    }
+
+    // ─── Broadcast System Emergency ──────────────────────────────────────────
+    async broadcastSystemEmergency(enabled: boolean, reason: string) {
+        // Fetch all users
+        const allUsers = await this.db.select({ id: users.id, notificationSettings: users.notificationSettings }).from(users);
+
+        const type = enabled ? 'SYSTEM_EMERGENCY' : 'BROADCAST';
+        const message = enabled 
+            ? `🚨 SYSTEM EMERGENCY ENABLED: ${reason}`
+            : `ℹ️ System Emergency Disabled: ${reason || 'Normal operations resumed.'}`;
+
+        const newNotifications = allUsers.map(u => ({
+            userId: u.id,
+            reportId: null,
+            type,
+            message,
+            isRead: false,
+        }));
+
+        if (newNotifications.length > 0) {
+            // Bulk insert in Postgres
+            await this.db.insert(notifications).values(newNotifications);
+        }
+
+        // Send to all connected active websockets (pass a dummy generic object since it doesn't have an ID yet)
+        this.notificationsGateway.broadcastToAll({
+            type,
+            message,
+            isRead: false,
+            createdAt: new Date().toISOString()
         });
+
+        // Native OS push to all eligible users
+        const pushRecipientIds = allUsers.filter(u => {
+            const settingsStr = u.notificationSettings || '{}';
+            const settings = typeof settingsStr === 'string' ? JSON.parse(settingsStr) : settingsStr;
+            // Always dispatch "System Emergency mode" unless they explicitly globally mute
+            return settings.pushEnabled !== false;
+        }).map(u => u.id);
+
+        if (pushRecipientIds.length > 0) {
+            await this.sendPushToUsers(pushRecipientIds, {
+                title: enabled ? '🚨 SYSTEM EMERGENCY' : 'ℹ️ Emergency Lifted',
+                body: message,
+                data: { type },
+            });
+        }
     }
 
     // ─── Paginated notification feed for a user ───────────────────────────────

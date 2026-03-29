@@ -65,6 +65,10 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
                 this.server.to(socketId).emit('newNotification', payload);
             });
         }
-        // Also emit to a general channel if needed, or simply let the user know
+    }
+
+    // Broadcast to all connected users
+    broadcastToAll(payload: any) {
+        this.server.emit('newNotification', payload);
     }
 }
