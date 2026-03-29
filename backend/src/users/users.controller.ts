@@ -43,4 +43,9 @@ export class UsersController {
   toggleSavedReport(@Req() req: any, @Body('reportId', ParseIntPipe) reportId: number) {
     return this.usersService.toggleSavedReport(req.user.userId, reportId);
   }
+
+  @Patch('push-token')
+  updatePushToken(@Req() req: any, @Body('token') token: string | null) {
+    return this.usersService.updatePushToken(req.user.userId, token ?? null);
+  }
 }

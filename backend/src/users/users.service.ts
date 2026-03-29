@@ -166,4 +166,11 @@ export class UsersService {
     await this.db.delete(subscriptions).where(sql`${subscriptions.id} = ${subscriptionId} AND ${subscriptions.userId} = ${userId}`);
     return { success: true };
   }
+
+  async updatePushToken(userId: number, token: string | null) {
+    await this.db.update(users)
+      .set({ pushToken: token, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+    return { success: true };
+  }
 }

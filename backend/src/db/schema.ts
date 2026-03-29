@@ -30,6 +30,7 @@ export const users = pgTable('users', {
   cityId: integer('city_id').references(() => cities.id),
   areaId: integer('area_id').references(() => areas.id),
   notificationSettings: text('notification_settings').default('{"critical":true,"warnings":true,"updates":true,"reviews":false}'),
+  pushToken: text('push_token'), // Expo Push Token for native notifications
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   appealReceived: boolean('appeal_received').default(false).notNull(),
