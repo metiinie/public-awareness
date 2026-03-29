@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { users, reports, reactions, cities, areas } from '../db/schema';
+import { users, reports, reactions, cities, areas, savedReports, subscriptions, categories } from '../db/schema';
 
 @Injectable()
 export class UsersService {
@@ -49,9 +49,23 @@ export class UsersService {
       sql`${reports.reporterId} = ${userId} AND ${reports.status} = 'VERIFIED'`
     );
 
+    // Subscriptions details
+    const userSubs = await this.db.select({
+      id: subscriptions.id,
+      areaId: subscriptions.areaId,
+      categoryId: subscriptions.categoryId,
+      areaName: areas.name,
+      categoryName: categories.name,
+    })
+    .from(subscriptions)
+    .leftJoin(areas, eq(subscriptions.areaId, areas.id))
+    .leftJoin(categories, eq(subscriptions.categoryId, categories.id))
+    .where(eq(subscriptions.userId, userId));
+
     return {
       ...user,
       location: { city, area },
+      subscriptions: userSubs,
       stats: {
         reportsCreated: Number(reportCount?.count || 0),
         votesGiven: Number(voteCount?.count || 0),
@@ -105,5 +119,51 @@ export class UsersService {
     return typeof user.notificationSettings === 'string' 
       ? JSON.parse(user.notificationSettings) 
       : user.notificationSettings;
+  }
+
+  async getSavedReports(userId: number) {
+    return this.db.select({
+        id: reports.id,
+        title: reports.title,
+        description: reports.description,
+        status: reports.status,
+        urgency: reports.urgency,
+        mediaUrl: reports.mediaUrl,
+        createdAt: reports.createdAt,
+        saveId: savedReports.id
+    })
+    .from(savedReports)
+    .innerJoin(reports, eq(savedReports.reportId, reports.id))
+    .where(eq(savedReports.userId, userId))
+    .orderBy(sql`${savedReports.createdAt} DESC`);
+  }
+
+  async toggleSavedReport(userId: number, reportId: number) {
+    const [existing] = await this.db.select()
+        .from(savedReports)
+        .where(sql`${savedReports.userId} = ${userId} AND ${savedReports.reportId} = ${reportId}`)
+        .limit(1);
+
+    if (existing) {
+        await this.db.delete(savedReports).where(eq(savedReports.id, existing.id));
+        return { saved: false };
+    } else {
+        await this.db.insert(savedReports).values({ userId, reportId });
+        return { saved: true };
+    }
+  }
+
+  async addSubscription(userId: number, data: { areaId?: number, categoryId?: number }) {
+    const [sub] = await this.db.insert(subscriptions).values({
+        userId,
+        areaId: data.areaId,
+        categoryId: data.categoryId
+    }).returning();
+    return sub;
+  }
+
+  async removeSubscription(userId: number, subscriptionId: number) {
+    await this.db.delete(subscriptions).where(sql`${subscriptions.id} = ${subscriptionId} AND ${subscriptions.userId} = ${userId}`);
+    return { success: true };
   }
 }

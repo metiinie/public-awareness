@@ -208,6 +208,16 @@ export const moderationReports = pgTable('moderation_reports', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// --- Saved Reports ---
+export const savedReports = pgTable('saved_reports', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id).notNull(),
+  reportId: integer('report_id').references(() => reports.id).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userReportIdx: index('saved_report_user_report_idx').on(table.userId, table.reportId),
+}));
+
 // --- Audit Logs ---
 export const auditLogs = pgTable('audit_logs', {
   id: serial('id').primaryKey(),
@@ -260,6 +270,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   subscriptions: many(subscriptions),
   comments: many(comments),
   notifications: many(notifications),
+  savedReports: many(savedReports),
   warnings: many(userWarnings, { relationName: 'user_warnings' }),
   suspensions: many(userSuspensions, { relationName: 'user_suspensions' }),
   sessions: many(adminSessions),
@@ -293,6 +304,7 @@ export const reportsRelations = relations(reports, ({ one, many }) => ({
   reactions: many(reactions),
   comments: many(comments),
   notifications: many(notifications),
+  savedReports: many(savedReports),
 }));
 
 export const moderationNotesRelations = relations(moderationNotes, ({ one }) => ({
@@ -356,6 +368,11 @@ export const commentsRelations = relations(comments, ({ one }) => ({
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   user: one(users, { fields: [notifications.userId], references: [users.id] }),
   report: one(reports, { fields: [notifications.reportId], references: [reports.id] }),
+}));
+
+export const savedReportsRelations = relations(savedReports, ({ one }) => ({
+  user: one(users, { fields: [savedReports.userId], references: [users.id] }),
+  report: one(reports, { fields: [savedReports.reportId], references: [reports.id] }),
 }));
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({

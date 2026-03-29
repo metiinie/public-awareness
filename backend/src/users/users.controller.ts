@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Delete, Body, UseGuards, Req, Param, ParseIntPipe } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -32,5 +32,15 @@ export class UsersController {
   @Patch('notification-settings')
   updateNotificationSettings(@Req() req: any, @Body() settings: any) {
     return this.usersService.updateNotificationSettings(req.user.userId, settings);
+  }
+  
+  @Get('saved-reports')
+  getSavedReports(@Req() req: any) {
+    return this.usersService.getSavedReports(req.user.userId);
+  }
+
+  @Post('saved-reports/toggle')
+  toggleSavedReport(@Req() req: any, @Body('reportId', ParseIntPipe) reportId: number) {
+    return this.usersService.toggleSavedReport(req.user.userId, reportId);
   }
 }
