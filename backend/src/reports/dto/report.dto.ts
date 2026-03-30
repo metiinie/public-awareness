@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsInt, IsOptional, IsArray } from 'class-validator';
+import { IsString, IsNotEmpty, IsInt, IsOptional, IsArray, IsNumber } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -38,6 +38,30 @@ export class CreateReportDto {
   @ApiProperty({ type: [String], example: ['https://example.com/image.jpg'] })
   @IsArray()
   mediaUrls: string[];
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  restaurantId?: number;
+
+  @ApiPropertyOptional({ example: 5 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  rating?: number;
+ 
+  @ApiPropertyOptional({ example: 9.0123 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  latitude?: number;
+ 
+  @ApiPropertyOptional({ example: 38.7421 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  longitude?: number;
 }
 
 export class FilterReportDto {

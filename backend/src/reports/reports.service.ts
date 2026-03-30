@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
-import { reports, media, reactions, users, categories, areas, cities, comments, moderationReports } from '../db/schema';
+import { reports, media, reactions, users, categories, areas, cities, comments, moderationReports, foodReviews, restaurants, savedReports, systemSettings } from '../db/schema';
 import { eq, and, or, desc, sql, SQL, lte, ne, lt } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -13,11 +13,20 @@ export class ReportsService {
   ) { }
 
   async create(createReportDto: CreateReportDto, userId: number) {
-    const { mediaUrls, ...reportData } = createReportDto;
+    const { mediaUrls, restaurantId, rating, latitude, longitude, ...reportData } = createReportDto;
 
     // --- Evidence Rule ---
     if (!mediaUrls || mediaUrls.length === 0) {
       throw new BadRequestException('At least one image or video is required to submit a report.');
+    }
+
+    // --- PlaceName Logic for Food Reviews ---
+    let finalPlaceName = reportData.placeName || null;
+    if (restaurantId) {
+      const [rest] = await this.db.select().from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
+      if (rest) {
+        finalPlaceName = rest.name;
+      }
     }
 
     // --- Auto Archiving Logic ---
@@ -56,8 +65,10 @@ export class ReportsService {
         reporterId: userId,
         status: initialStatus,
         urgency: reportData.urgency || 'INFO',
-        placeName: reportData.placeName || null,
+        placeName: finalPlaceName,
         confidenceScore: initialReportTrust,
+        latitude: latitude,
+        longitude: longitude,
         autoArchiveAt: autoArchiveAt,
       }).returning();
 
@@ -85,10 +96,37 @@ export class ReportsService {
         }
       }
 
+      // 2.5 Insert Food Review if applicable
+      if (restaurantId && rating) {
+        await this.db.insert(foodReviews).values({
+          restaurantId,
+          userId,
+          rating,
+          title: reportData.title,
+          body: reportData.description || undefined,
+          mediaUrls: mediaUrls || [],
+        });
+
+        // Update restaurant averages
+        const existingReviews = await this.db.select().from(foodReviews).where(eq(foodReviews.restaurantId, restaurantId));
+        const currentCount = existingReviews.length;
+        const sumRating = existingReviews.reduce((acc: any, review: any) => acc + review.rating, 0);
+        const newAvg = currentCount > 0 ? (sumRating / currentCount) : rating;
+
+        await this.db.update(restaurants)
+          .set({
+            avgRating: newAvg,
+            reviewCount: currentCount,
+          })
+          .where(eq(restaurants.id, restaurantId));
+      }
+
       // 3. Trigger Notifications
       const fullReport = await this.findOne(newReport.id);
       try {
         await this.notificationsService.handleNewReport(fullReport);
+        // Also broadcast for real-time feed updates
+        this.notificationsService.broadcastNewReport(fullReport);
       } catch (e) {
         console.error('[ReportsService] Notification trigger failed:', e.message);
       }
@@ -140,6 +178,10 @@ export class ReportsService {
     }
     if (reporterId) whereClauses.push(eq(reports.reporterId, reporterId));
 
+    if (filters.cursor) {
+      whereClauses.push(lt(reports.id, filters.cursor));
+    }
+
     if (whereClauses.length > 0) {
       query = query.where(and(...whereClauses));
     }
@@ -159,13 +201,20 @@ export class ReportsService {
         );
         break;
       case 'votes':
+        // Trending Algorithm: (Actual Votes - Fake Votes) / (Hours + 2)^1.8
         query = query.orderBy(sortOrder === 'desc' ? 
-          desc(sql`(SELECT count(*) FROM reactions WHERE report_id = ${reports.id})`) : 
-          sql`(SELECT count(*) FROM reactions WHERE report_id = ${reports.id})`
+          desc(sql`((SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'REAL') - (SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'FAKE')) / pow((extract(epoch from (now() - ${reports.createdAt}))/3600) + 2, 1.8)`) : 
+          sql`((SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'REAL') - (SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'FAKE')) / pow((extract(epoch from (now() - ${reports.createdAt}))/3600) + 2, 1.8)`
         );
         break;
       default:
         query = query.orderBy(sortOrder === 'desc' ? desc(reports.createdAt) : reports.createdAt);
+    }
+
+    if (filters.limit) {
+      query = query.limit(filters.limit);
+    } else {
+      query = query.limit(20);
     }
 
     const results = await query;
@@ -287,7 +336,7 @@ export class ReportsService {
     };
   }
 
-  async vote(reportId: number, userId: number, type: 'REAL' | 'FAKE') {
+  async vote(reportId: number, userId: number, type: 'REAL' | 'FAKE' | 'LIKE') {
     // Check if already voted
     const [existing] = await this.db.select().from(reactions).where(
       and(eq(reactions.reportId, reportId), eq(reactions.userId, userId))
@@ -305,10 +354,26 @@ export class ReportsService {
       await this.db.insert(reactions).values({ reportId, userId, type });
     }
 
-    // Recalculate Confidence Score and Update User Trust
-    await this.updateScores(reportId);
+    // Recalculate Confidence Score and Update User Trust (only for REAL/FAKE votes)
+    if (type !== 'LIKE') {
+      await this.updateScores(reportId);
+    }
 
     return { success: true };
+  }
+
+  async toggleSave(reportId: number, userId: number) {
+    const [existing] = await this.db.select().from(savedReports).where(
+      and(eq(savedReports.reportId, reportId), eq(savedReports.userId, userId))
+    ).limit(1);
+
+    if (existing) {
+      await this.db.delete(savedReports).where(eq(savedReports.id, existing.id));
+      return { saved: false };
+    } else {
+      await this.db.insert(savedReports).values({ reportId, userId });
+      return { saved: true };
+    }
   }
 
   private async updateScores(reportId: number) {
@@ -586,8 +651,11 @@ export class ReportsService {
       },
       votesReal: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL')`,
       votesFake: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE')`,
+      likeCount: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'LIKE')`,
       commentCount: sql<number>`(SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id})`,
-      userVote: viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} LIMIT 1)` : sql`NULL`,
+      userVote: viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} AND (reactions.type = 'REAL' OR reactions.type = 'FAKE') LIMIT 1)` : sql`NULL`,
+      userLiked: viewerId ? sql<boolean>`EXISTS(SELECT 1 FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} AND reactions.type = 'LIKE')` : sql`FALSE`,
+      userSaved: viewerId ? sql<boolean>`EXISTS(SELECT 1 FROM saved_reports WHERE saved_reports.report_id = ${reports.id} AND saved_reports.user_id = ${viewerId})` : sql`FALSE`,
     };
   }
 

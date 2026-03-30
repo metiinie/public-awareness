@@ -71,4 +71,9 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     broadcastToAll(payload: any) {
         this.server.emit('newNotification', payload);
     }
+
+    // Broadcast a new report event
+    broadcastNewReport(report: any) {
+        this.server.emit('newReport', report);
+    }
 }

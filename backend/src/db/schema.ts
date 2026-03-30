@@ -102,6 +102,8 @@ export const reports = pgTable('reports', {
   confidenceScore: integer('confidence_score').default(50).notNull(), // Rename from trust_score
   mediaUrl: text('media_url'), // Direct access to primary evidence
   masterReportId: integer('master_report_id'), // Self-reference for merging
+  latitude: real('latitude'),
+  longitude: real('longitude'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   autoArchiveAt: timestamp('auto_archive_at'),

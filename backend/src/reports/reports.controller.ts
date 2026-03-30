@@ -61,9 +61,17 @@ export class ReportsController {
   @Post(':id/vote')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Vote REAL or FAKE on a report' })
-  vote(@Param('id') id: string, @Body('type') type: 'REAL' | 'FAKE', @Request() req) {
+  @ApiOperation({ summary: 'Vote REAL, FAKE, or LIKE on a report' })
+  vote(@Param('id') id: string, @Body('type') type: 'REAL' | 'FAKE' | 'LIKE', @Request() req) {
     return this.reportsService.vote(+id, req.user.userId, type);
+  }
+
+  @Post(':id/save')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Toggle save status of a report' })
+  toggleSave(@Param('id') id: string, @Request() req) {
+    return this.reportsService.toggleSave(+id, req.user.userId);
   }
 
   @Post(':id/comments')

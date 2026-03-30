@@ -163,6 +163,11 @@ export class NotificationsService {
         }
     }
 
+    // ─── Broadcast new report to all connected websockets ─────────────────────
+    broadcastNewReport(report: any) {
+        this.notificationsGateway.broadcastNewReport(report);
+    }
+
     // ─── Handle status change: notify the report's author ────────────────────
     async handleStatusChange(report: any, newStatus: string) {
         if (!report || !report.reporterId) return;
