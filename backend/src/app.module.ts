@@ -23,9 +23,6 @@ import { UsersModule } from './users/users.module';
 import { EmergencyModeGuard } from './auth/guards/emergency-mode.guard';
 import { RedisModule } from './redis/redis.module';
 
-
-
-
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { WinstonModule } from 'nest-winston';
 import * as winston from 'winston';

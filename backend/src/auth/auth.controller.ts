@@ -2,7 +2,7 @@ import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Request, 
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { LoginDto, RegisterDto, UpdateProfileDto } from './dto/auth.dto';
+import { LoginDto, RegisterDto, UpdateProfileDto, MfaCodeDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('auth')
@@ -56,5 +56,36 @@ export class AuthController {
       console.error('Error updating profile for user:', req.user.userId, error);
       throw error;
     }
+  }
+
+  @Post('mfa/setup')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generate MFA QR code and secret' })
+  @ApiResponse({ status: 200, description: 'MFA setup initialized.' })
+  setupMfa(@Request() req) {
+    return this.authService.generateMfaSecret(req.user.userId, req.user.email);
+  }
+
+  @Post('mfa/activate')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Activate MFA using a code' })
+  @ApiResponse({ status: 200, description: 'MFA successfully activated.' })
+  activateMfa(@Request() req, @Body() mfaDto: MfaCodeDto) {
+    return this.authService.activateMfa(req.user.userId, mfaDto.code);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('mfa/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify MFA during login' })
+  @ApiResponse({ status: 200, description: 'Successfully verified.' })
+  @ApiResponse({ status: 401, description: 'Invalid token or code.' })
+  verifyMfa(@Body() mfaDto: MfaCodeDto) {
+    if (!mfaDto.mfaToken) {
+      throw new Error('mfaToken is required for verification');
+    }
+    return this.authService.verifyMfa(mfaDto.mfaToken, mfaDto.code);
   }
 }

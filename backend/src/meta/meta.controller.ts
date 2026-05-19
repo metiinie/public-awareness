@@ -1,6 +1,5 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { Inject } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { cities, areas, categories } from '../db/schema';
 import { eq } from 'drizzle-orm';

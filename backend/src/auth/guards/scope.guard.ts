@@ -4,6 +4,7 @@ import {
   ExecutionContext,
   ForbiddenException,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { SCOPE_KEY, ScopeEntity } from '../decorators/scoped.decorator';
@@ -20,6 +21,8 @@ import * as schema from '../../db/schema';
  */
 @Injectable()
 export class ScopeGuard implements CanActivate {
+  private readonly logger = new Logger(ScopeGuard.name);
+
   constructor(
     private reflector: Reflector,
     @Inject(DRIZZLE_PROVIDER) private db: any,
@@ -74,13 +77,13 @@ export class ScopeGuard implements CanActivate {
     }
 
     if (entityCityId !== null && entityCityId !== adminCityId) {
-      console.error(`[ScopeGuard] Forbidden: entityCityId (${entityCityId}) !== adminCityId (${adminCityId}) for targetId ${targetId} entity ${entity}`);
+      this.logger.error(`Forbidden: entityCityId (${entityCityId}) !== adminCityId (${adminCityId}) for targetId ${targetId} entity ${entity}`);
       throw new ForbiddenException(
         'You do not have permission to act on entities outside your assigned scope.',
       );
     }
 
-    console.log(`[ScopeGuard] Allowed: entityCityId (${entityCityId}) === adminCityId (${adminCityId}) for targetId ${targetId} entity ${entity}`);
+    this.logger.log(`Allowed: entityCityId (${entityCityId}) === adminCityId (${adminCityId}) for targetId ${targetId} entity ${entity}`);
     return true;
   }
 }

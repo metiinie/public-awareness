@@ -33,3 +33,12 @@ export class UpdateProfileDto {
   @ApiProperty({ example: 'https://avatar.url', required: false })
   avatar?: string;
 }
+
+export class MfaCodeDto {
+  @ApiProperty({ example: '123456' })
+  @IsNotEmpty()
+  code: string;
+
+  @ApiProperty({ example: 'eyJ...', required: false })
+  mfaToken?: string;
+}

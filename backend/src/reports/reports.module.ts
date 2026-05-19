@@ -12,6 +12,7 @@ import { ReportsTask } from './reports.task';
   ],
   controllers: [ReportsController, CommentsController],
   providers: [ReportsService, CommentsService, ReportsTask],
+  exports: [ReportsService],
 })
 export class ReportsModule { }
 

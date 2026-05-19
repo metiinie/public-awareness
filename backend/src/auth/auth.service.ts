@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, Inject, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -6,16 +6,15 @@ import { eq, sql } from 'drizzle-orm';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { users, reports, reactions } from '../db/schema';
 import { LoginDto, RegisterDto, UpdateProfileDto } from './dto/auth.dto';
-
+import { generateSecret, generateURI, verifySync } from 'otplib';
+import * as qrcode from 'qrcode';
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(DRIZZLE_PROVIDER) private db: any,
     private jwtService: JwtService,
     private configService: ConfigService,
-  ) {
-    console.log('[AuthService] Initialized with secret length:', this.configService.get('JWT_SECRET')?.length || 0);
-  }
+  ) {}
 
   async getProfile(userId: number) {
     const [user] = await this.db.select({
@@ -86,6 +85,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.mfaEnabled) {
+      const mfaPayload = { sub: user.id, mfaPending: true };
+      const mfaToken = this.jwtService.sign(mfaPayload, { expiresIn: '5m' });
+      return { requiresMfa: true, mfaToken };
+    }
+
     return this.generateToken(user);
   }
 
@@ -98,10 +103,71 @@ export class AuthService {
       .where(eq(users.id, userId))
       .returning();
 
-    return updatedUser;
+    return this.generateToken(updatedUser);
   }
 
-  private generateToken(user: any) {
+  async generateMfaSecret(userId: number, email: string) {
+    const secret = generateSecret();
+    const otpauthUrl = generateURI({ issuer: 'CivicWatch', label: email, secret });
+
+    await this.db.update(users).set({ mfaSecret: secret }).where(eq(users.id, userId));
+
+    const qrCodeDataUrl = await qrcode.toDataURL(otpauthUrl);
+    return {
+      secret,
+      qrCodeUrl: qrCodeDataUrl
+    };
+  }
+
+  async activateMfa(userId: number, code: string) {
+    const [user] = await this.db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user || !user.mfaSecret) {
+      throw new UnauthorizedException('MFA not set up');
+    }
+
+    let isValid = false;
+    try {
+      isValid = verifySync({ token: code, secret: user.mfaSecret }).valid;
+    } catch (e) {
+      isValid = false;
+    }
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid MFA code');
+    }
+
+    await this.db.update(users).set({ mfaEnabled: true }).where(eq(users.id, userId));
+    return { success: true, message: 'MFA activated successfully' };
+  }
+
+  async verifyMfa(mfaToken: string, code: string) {
+    try {
+      const decoded = this.jwtService.verify(mfaToken);
+      if (!decoded.mfaPending) {
+        throw new UnauthorizedException('Invalid token type');
+      }
+
+      const [user] = await this.db.select().from(users).where(eq(users.id, decoded.sub)).limit(1);
+      if (!user || !user.mfaEnabled || !user.mfaSecret) {
+        throw new UnauthorizedException('MFA not enabled for this user');
+      }
+
+      let isValid = false;
+      try {
+        isValid = verifySync({ token: code, secret: user.mfaSecret }).valid;
+      } catch (e) {
+        isValid = false;
+      }
+      if (!isValid) {
+        throw new UnauthorizedException('Invalid MFA code');
+      }
+
+      return this.generateToken(user);
+    } catch (error) {
+      throw new UnauthorizedException('Invalid or expired MFA token');
+    }
+  }
+
+  generateToken(user: any) {
     const payload = { 
       sub: user.id, 
       email: user.email, 

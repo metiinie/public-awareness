@@ -20,4 +20,17 @@ export class ReportsTask {
             this.logger.error('Failed to run auto-archive task', error.stack);
         }
     }
+
+    @Cron(CronExpression.EVERY_HOUR)
+    async handleConfidenceDecay() {
+        this.logger.debug('Running confidence decay task...');
+        try {
+            const decayCount = await this.reportsService.decayActiveReportsConfidence();
+            if (decayCount > 0) {
+                this.logger.log(`Successfully decayed confidence scores for ${decayCount} active reports.`);
+            }
+        } catch (error) {
+            this.logger.error('Failed to run confidence decay task', error.stack);
+        }
+    }
 }

@@ -8,11 +8,15 @@ import { ScopeGuard } from '../auth/guards/scope.guard';
 import { AdminRateLimitGuard } from '../auth/guards/admin-rate-limit.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Scoped } from '../auth/decorators/scoped.decorator';
+import { AuthService } from '../auth/auth.service';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly authService: AuthService,
+  ) {}
 
   /** Extract the originating IP from the request. */
   private getIp(req: any): string {
@@ -121,30 +125,38 @@ export class AdminController {
 
   @Post('reports/:id/archive')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  @UseGuards(ScopeGuard)
+  @Scoped('REPORT')
   archiveReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
     return this.adminService.archiveReport(+id, req.user.userId, reason);
   }
 
   @Post('reports/:id/request-evidence')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  @UseGuards(ScopeGuard)
+  @Scoped('REPORT')
   requestMoreEvidence(@Param('id') id: string, @Body('message') message: string, @Req() req: any) {
     return this.adminService.requestMoreEvidence(+id, req.user.userId, message);
   }
 
   @Post('reports/:id/merge')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  @UseGuards(ScopeGuard)
+  @Scoped('REPORT')
   mergeReports(@Param('id') id: string, @Body('mergedIds') mergedIds: number[], @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.mergeReports(+id, mergedIds, req.user.userId, reason);
+    return this.adminService.mergeReports(+id, mergedIds, req.user.userId, reason, req.user.cityId);
   }
 
   @Post('reports/bulk-status')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   bulkUpdateStatus(@Body() body: { ids: number[], status: any, reason: string }, @Req() req: any) {
-    return this.adminService.bulkUpdateStatus(body.ids, body.status, req.user.userId, body.reason);
+    return this.adminService.bulkUpdateStatus(body.ids, body.status, req.user.userId, body.reason, req.user.cityId);
   }
 
   @Patch('reports/:id/status')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
+  @UseGuards(ScopeGuard, AdminRateLimitGuard)
+  @Scoped('REPORT')
   updateReportStatus(@Param('id') id: string, @Body('status') status: any, @Body('reason') reason: string, @Req() req: any) {
     return this.adminService.updateReportStatus(+id, status, req.user.userId, reason, this.getIp(req));
   }
@@ -427,8 +439,9 @@ export class AdminController {
 
   @Post('profile/switch-scope')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  switchScope(@Body('cityId') cityId: number | null, @Body('areaId') areaId: number | null, @Req() req: any) {
-    return this.adminService.switchScope(req.user.userId, cityId, areaId);
+  async switchScope(@Body('cityId') cityId: number | null, @Body('areaId') areaId: number | null, @Req() req: any) {
+    const [updatedUser] = await this.adminService.switchScope(req.user.userId, cityId, areaId);
+    return this.authService.generateToken(updatedUser);
   }
 
   // --- Super Admin: Admin Personnel Management ---

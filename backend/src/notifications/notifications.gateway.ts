@@ -5,7 +5,7 @@ import {
     OnGatewayDisconnect
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 
 @Injectable()
 @WebSocketGateway({
@@ -17,24 +17,23 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     @WebSocketServer()
     server: Server;
 
+    private readonly logger = new Logger(NotificationsGateway.name);
+
     // A simple map to keep track of userId -> socketIds
     private userSockets: Map<number, Set<string>> = new Map();
 
     handleConnection(client: Socket) {
-        console.log(`[NotificationsGateway] Client connected: ${client.id}`);
-        // Typically, you'd extract user identity from handshake auth/headers:
-        // const userId = client.handshake.auth.userId;
-        // if (userId) this.addUserSocket(Number(userId), client.id);
+        this.logger.log(`Client connected: ${client.id}`);
         
         // As a simpler fallback for React Native, we can listen to an explicit generic 'register' event:
         client.on('register', (userId: number) => {
-            console.log(`[NotificationsGateway] Registering socket ${client.id} for user ${userId}`);
+            this.logger.log(`Registering socket ${client.id} for user ${userId}`);
             this.addUserSocket(userId, client.id);
         });
     }
 
     handleDisconnect(client: Socket) {
-        console.log(`[NotificationsGateway] Client disconnected: ${client.id}`);
+        this.logger.log(`Client disconnected: ${client.id}`);
         this.removeUserSocket(client.id);
     }
 

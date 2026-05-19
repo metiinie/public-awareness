@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Request, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
@@ -7,6 +7,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @ApiTags('reports')
 @Controller('reports')
 export class ReportsController {
+  private readonly logger = new Logger(ReportsController.name);
+
   constructor(private readonly reportsService: ReportsService) { }
 
   @Post()
@@ -14,7 +16,7 @@ export class ReportsController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new report' })
   create(@Body() createReportDto: CreateReportDto, @Request() req) {
-    console.log(`[ReportsController] POST /reports hit by user ${req.user.userId}`);
+    this.logger.log(`POST /reports hit by user ${req.user.userId}`);
     return this.reportsService.create(createReportDto, req.user.userId);
   }
 

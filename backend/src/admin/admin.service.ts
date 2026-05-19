@@ -283,7 +283,20 @@ export class AdminService {
     return csvContent;
   }
 
-  async bulkUpdateStatus(ids: number[], status: any, adminId: number, reason: string) {
+  async bulkUpdateStatus(ids: number[], status: any, adminId: number, reason: string, adminCityId?: number | null) {
+    if (adminCityId) {
+      const targetReports = await this.db
+        .select({ cityId: schema.reports.cityId })
+        .from(schema.reports)
+        .where(inArray(schema.reports.id, ids));
+      
+      for (const r of targetReports) {
+        if (r.cityId !== adminCityId) {
+          throw new Error('Unauthorized: One or more reports are outside your assigned city scope');
+        }
+      }
+    }
+
     const results = await this.db
       .update(schema.reports)
       .set({ status, updatedAt: new Date() })
@@ -294,7 +307,20 @@ export class AdminService {
     return results;
   }
 
-  async mergeReports(masterId: number, duplicateIds: number[], adminId: number, reason: string) {
+  async mergeReports(masterId: number, duplicateIds: number[], adminId: number, reason: string, adminCityId?: number | null) {
+    if (adminCityId) {
+      const targetReports = await this.db
+        .select({ cityId: schema.reports.cityId })
+        .from(schema.reports)
+        .where(inArray(schema.reports.id, [masterId, ...duplicateIds]));
+      
+      for (const r of targetReports) {
+        if (r.cityId !== adminCityId) {
+          throw new Error('Unauthorized: One or more reports are outside your assigned city scope');
+        }
+      }
+    }
+
     // 1. Mark duplicates as ARCHIVED and point to master
     await this.db
       .update(schema.reports)

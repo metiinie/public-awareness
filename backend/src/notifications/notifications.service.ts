@@ -91,7 +91,8 @@ export class NotificationsService {
                 userId: subscriptions.userId,
                 areaId: subscriptions.areaId,
                 categoryId: subscriptions.categoryId,
-                notificationSettings: users.notificationSettings,
+                pushEnabled: sql<boolean>`(coalesce((${users.notificationSettings}::jsonb->>'pushEnabled'), 'true') = 'true')::boolean`,
+                criticalOnly: sql<boolean>`(coalesce((${users.notificationSettings}::jsonb->>'criticalOnly'), 'false') = 'true')::boolean`,
             })
             .from(subscriptions)
             .innerJoin(users, eq(subscriptions.userId, users.id))
@@ -101,7 +102,8 @@ export class NotificationsService {
                     or(
                         eq(subscriptions.categoryId, report.categoryId),
                         sql`${subscriptions.categoryId} IS NULL`
-                    )
+                    ),
+                    eq(users.status, 'ACTIVE')
                 )
             );
 
@@ -118,16 +120,17 @@ export class NotificationsService {
                     ? `🚨 CRITICAL ALERT: ${report.title} reported in ${report.area?.name || 'your area'}!`
                     : `⚠️ New ${report.category?.name || 'issue'} reported in ${report.area?.name || 'your area'}.`,
                 isRead: false,
-                // temporarily attach settings so we can filter push
-                _settings: sub.notificationSettings
+                _pushEnabled: sub.pushEnabled,
+                _criticalOnly: sub.criticalOnly
             }));
 
         if (newNotifications.length === 0) return;
 
-        // Strip _settings before DB insert
+        // Strip temporarily attached properties before DB insert
         const dbNotifs = newNotifications.map(n => {
             const copy = { ...n };
-            delete copy._settings;
+            delete (copy as any)._pushEnabled;
+            delete (copy as any)._criticalOnly;
             return copy;
         });
 
@@ -138,16 +141,13 @@ export class NotificationsService {
             this.notificationsGateway.notifyUser(n.userId, n);
         });
 
-        // Native OS push (OS-level alerts are filtered by user settings)
+        // Native OS push (OS-level alerts are filtered by pre-computed user settings)
         const pushRecipientIds = newNotifications.filter((n: any) => {
-            const settingsStr = n._settings || '{}';
-            const settings = typeof settingsStr === 'string' ? JSON.parse(settingsStr) : settingsStr;
-
             // Global push toggle
-            if (settings.pushEnabled === false) return false;
+            if (n._pushEnabled === false) return false;
 
             // Critical-only toggle
-            if (settings.criticalOnly === true && report.urgency !== 'CRITICAL') return false;
+            if (n._criticalOnly === true && report.urgency !== 'CRITICAL') return false;
 
             return true;
         }).map(n => n.userId);
@@ -216,8 +216,11 @@ export class NotificationsService {
 
     // ─── Broadcast System Emergency ──────────────────────────────────────────
     async broadcastSystemEmergency(enabled: boolean, reason: string) {
-        // Fetch all users
-        const allUsers = await this.db.select({ id: users.id, notificationSettings: users.notificationSettings }).from(users);
+        // Fetch all users with pre-computed pushEnabled flag from database
+        const allUsers = await this.db.select({ 
+            id: users.id, 
+            pushEnabled: sql<boolean>`(coalesce((${users.notificationSettings}::jsonb->>'pushEnabled'), 'true') = 'true')::boolean` 
+        }).from(users);
 
         const type = enabled ? 'SYSTEM_EMERGENCY' : 'BROADCAST';
         const message = enabled 
@@ -246,12 +249,9 @@ export class NotificationsService {
         });
 
         // Native OS push to all eligible users
-        const pushRecipientIds = allUsers.filter(u => {
-            const settingsStr = u.notificationSettings || '{}';
-            const settings = typeof settingsStr === 'string' ? JSON.parse(settingsStr) : settingsStr;
-            // Always dispatch "System Emergency mode" unless they explicitly globally mute
-            return settings.pushEnabled !== false;
-        }).map(u => u.id);
+        const pushRecipientIds = allUsers
+            .filter(u => u.pushEnabled !== false)
+            .map(u => u.id);
 
         if (pushRecipientIds.length > 0) {
             await this.sendPushToUsers(pushRecipientIds, {

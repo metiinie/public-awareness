@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { reports, media, reactions, users, categories, areas, cities, comments, moderationReports, foodReviews, restaurants, savedReports, systemSettings } from '../db/schema';
 import { eq, and, or, desc, sql, SQL, lte, ne, lt } from 'drizzle-orm';
@@ -7,6 +7,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
   constructor(
     @Inject(DRIZZLE_PROVIDER) private db: any,
     private readonly notificationsService: NotificationsService,
@@ -57,7 +59,7 @@ export class ReportsService {
     else if (userTrust < 30) initialReportTrust = 30;
 
     try {
-      console.log('[ReportsService] Inserting report with data:', JSON.stringify(reportData));
+      this.logger.log(`Inserting report with data: ${JSON.stringify(reportData)}`);
       // 1. Insert report
       const [newReport] = await this.db.insert(reports).values({
         ...reportData,
@@ -72,10 +74,10 @@ export class ReportsService {
         autoArchiveAt: autoArchiveAt,
       }).returning();
 
-      console.log('[ReportsService] Report inserted, ID:', newReport?.id);
+      this.logger.log(`Report inserted, ID: ${newReport?.id}`);
 
       if (initialStatus === 'UNDER_REVIEW') {
-        this.notificationsService.handleStatusChange(newReport, 'UNDER_REVIEW').catch(e => console.error('[ReportsService] Under-review notification failed', e));
+        this.notificationsService.handleStatusChange(newReport, 'UNDER_REVIEW').catch(e => this.logger.error('Under-review notification failed', e));
       }
 
       // 2. Insert media
@@ -128,13 +130,13 @@ export class ReportsService {
         // Also broadcast for real-time feed updates
         this.notificationsService.broadcastNewReport(fullReport);
       } catch (e) {
-        console.error('[ReportsService] Notification trigger failed:', e.message);
+        this.logger.error(`Notification trigger failed: ${e.message}`);
       }
 
       return fullReport;
     } catch (error) {
-      console.error('[ReportsService] CRITICAL FAILURE in create():', error);
-      if (error.stack) console.error(error.stack);
+      this.logger.error('CRITICAL FAILURE in create():', error);
+      if (error.stack) this.logger.error(error.stack);
       throw error;
     }
   }
@@ -280,14 +282,14 @@ export class ReportsService {
     
     query = this.applyReportJoins(query);
     
-    console.log('[ReportsService] Finding report with ID:', id);
+    this.logger.log(`Finding report with ID: ${id}`);
     const [report] = await query.where(eq(reports.id, id)).limit(1);
 
     if (!report) {
-       console.warn('[ReportsService] Report not found:', id);
+       this.logger.warn(`Report not found: ${id}`);
        throw new NotFoundException('Report not found');
     }
-    console.log('[ReportsService] Report found:', report.id);
+    this.logger.log(`Report found: ${report.id}`);
 
     const mediaItems = await this.db.select().from(media).where(eq(media.reportId, id));
     const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, id));
@@ -405,7 +407,7 @@ export class ReportsService {
         weights = { ...weights, ...customWeights };
       }
     } catch (e) {
-      console.error('[ReportsService] Failed to fetch trust weights, using defaults', e);
+      this.logger.error('Failed to fetch trust weights, using defaults', e);
     }
 
     // 1. Vote Ratio
@@ -447,7 +449,7 @@ export class ReportsService {
           .where(eq(users.id, report.reporterId));
 
         await this.db.update(reports).set({ status: 'VERIFIED' }).where(eq(reports.id, reportId));
-        this.notificationsService.handleStatusChange(report, 'VERIFIED').catch(e => console.error('[ReportsService] Status change notification failed', e));
+        this.notificationsService.handleStatusChange(report, 'VERIFIED').catch(e => this.logger.error('Status change notification failed', e));
       } else if (voteRatio <= 0.2) {
         // Decrease trust (-10) floor at 0
         await this.db.update(users)
@@ -458,7 +460,7 @@ export class ReportsService {
           .where(eq(users.id, report.reporterId));
 
         await this.db.update(reports).set({ status: 'REMOVED' }).where(eq(reports.id, reportId));
-        this.notificationsService.handleStatusChange(report, 'REMOVED').catch(e => console.error('[ReportsService] Status change notification failed', e));
+        this.notificationsService.handleStatusChange(report, 'REMOVED').catch(e => this.logger.error('Status change notification failed', e));
       }
     }
   }
@@ -551,6 +553,25 @@ export class ReportsService {
       .returning();
 
     return result.length;
+  }
+
+  async decayActiveReportsConfidence() {
+    // Fetch all active reports (status in 'REPORTED', 'UNDER_REVIEW', 'VERIFIED')
+    const activeReports = await this.db
+      .select({ id: reports.id })
+      .from(reports)
+      .where(sql`${reports.status} IN ('REPORTED', 'UNDER_REVIEW', 'VERIFIED')`);
+
+    this.logger.log(`Starting hourly confidence decay for ${activeReports.length} active reports`);
+
+    for (const report of activeReports) {
+      try {
+        await this.updateScores(report.id);
+      } catch (err) {
+        this.logger.error(`Failed to decay confidence for report ${report.id}:`, err);
+      }
+    }
+    return activeReports.length;
   }
 
   async createComment(reportId: number, userId: number, content: string) {

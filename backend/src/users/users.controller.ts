@@ -1,13 +1,15 @@
 import { Controller, Get, Patch, Post, Delete, Body, UseGuards, Req, Param, ParseIntPipe } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthService } from '../auth/auth.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {
-    console.log('[UsersController] Initialized');
-  }
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Get('profile')
   getProfile(@Req() req: any) {
@@ -15,8 +17,9 @@ export class UsersController {
   }
 
   @Patch('profile')
-  updateProfile(@Req() req: any, @Body() data: any) {
-    return this.usersService.updateProfile(req.user.userId, data);
+  async updateProfile(@Req() req: any, @Body() data: any) {
+    const updatedUser = await this.usersService.updateProfile(req.user.userId, data);
+    return this.authService.generateToken(updatedUser);
   }
 
   @Get('my-reports')
