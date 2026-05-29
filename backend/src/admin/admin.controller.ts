@@ -217,7 +217,7 @@ export class AdminController {
 
   @Patch('users/:id/role')
   @Roles('SUPER_ADMIN')
-  updateUserRole(@Param('id') id: string, @Body('role') role: 'USER' | 'ADMIN' | 'SUPER_ADMIN', @Req() req: any) {
+  updateUserRole(@Param('id') id: string, @Body('role') role: 'USER' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMIN', @Req() req: any) {
     return this.adminService.updateUserRole(+id, role, req.user.userId);
   }
 

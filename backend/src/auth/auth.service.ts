@@ -8,13 +8,19 @@ import { users, reports, reactions } from '../db/schema';
 import { LoginDto, RegisterDto, UpdateProfileDto } from './dto/auth.dto';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import * as qrcode from 'qrcode';
+import { OAuth2Client } from 'google-auth-library';
+
 @Injectable()
 export class AuthService {
+  private googleClient: OAuth2Client;
+
   constructor(
     @Inject(DRIZZLE_PROVIDER) private db: any,
     private jwtService: JwtService,
     private configService: ConfigService,
-  ) {}
+  ) {
+    this.googleClient = new OAuth2Client(this.configService.get<string>('GOOGLE_CLIENT_ID'));
+  }
 
   async getProfile(userId: number) {
     const [user] = await this.db.select({
@@ -89,6 +95,57 @@ export class AuthService {
       const mfaPayload = { sub: user.id, mfaPending: true };
       const mfaToken = this.jwtService.sign(mfaPayload, { expiresIn: '5m' });
       return { requiresMfa: true, mfaToken };
+    }
+
+    return this.generateToken(user);
+  }
+
+  async googleLogin(idToken: string) {
+    let ticket;
+    try {
+      ticket = await this.googleClient.verifyIdToken({
+        idToken,
+        // Optional: specify audience if needed: audience: this.configService.get<string>('GOOGLE_CLIENT_ID'),
+      });
+    } catch (error) {
+      console.error('Google ID token verification failed:', error);
+      throw new UnauthorizedException('Invalid Google ID token');
+    }
+
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
+      throw new UnauthorizedException('Invalid Google payload');
+    }
+
+    const email = payload.email.toLowerCase().trim();
+    const googleId = payload.sub;
+    const fullName = payload.name || payload.given_name || 'Google User';
+    const avatar = payload.picture;
+
+    // Check if user exists by googleId
+    let [user] = await this.db.select().from(users).where(eq(users.googleId, googleId)).limit(1);
+
+    if (!user) {
+      // Check if user exists by email
+      [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+
+      if (user) {
+        // Link googleId to existing user
+        [user] = await this.db.update(users)
+          .set({ googleId, provider: 'GOOGLE' })
+          .where(eq(users.id, user.id))
+          .returning();
+      } else {
+        // Create new user
+        [user] = await this.db.insert(users).values({
+          email,
+          fullName,
+          avatar,
+          provider: 'GOOGLE',
+          googleId,
+          role: 'USER',
+        }).returning();
+      }
     }
 
     return this.generateToken(user);

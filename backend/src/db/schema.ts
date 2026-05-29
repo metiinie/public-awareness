@@ -19,11 +19,13 @@ export const countries = pgTable('countries', {
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: varchar('email', { length: 255 }).notNull().unique(),
-  password: text('password').notNull(),
+  password: text('password'), // Nullable for Google Auth users
   fullName: varchar('full_name', { length: 255 }).notNull(),
   avatar: text('avatar'),
   bio: text('bio'),
   role: userRoleEnum('role').default('USER').notNull(),
+  provider: varchar('provider', { length: 50 }).default('LOCAL').notNull(),
+  googleId: varchar('google_id', { length: 255 }).unique(),
   trustScore: integer('trust_score').default(50).notNull(),
   status: accountStatusEnum('status').default('ACTIVE').notNull(),
   suspensionUntil: timestamp('suspension_until'),

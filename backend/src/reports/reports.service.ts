@@ -178,7 +178,10 @@ export class ReportsService {
         sql`${reports.placeName} ILIKE ${'%' + filters.search + '%'}`
       ));
     }
-    if (reporterId) whereClauses.push(eq(reports.reporterId, reporterId));
+    if (reporterId) {
+      whereClauses.push(eq(reports.reporterId, reporterId));
+      whereClauses.push(ne(reports.status, 'REMOVED'));
+    }
 
     if (filters.cursor) {
       whereClauses.push(lt(reports.id, filters.cursor));
@@ -646,6 +649,23 @@ export class ReportsService {
     }).returning();
 
     return flag;
+  }
+
+  async remove(id: number, userId: number) {
+    const [report] = await this.db.select().from(reports).where(eq(reports.id, id)).limit(1);
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+
+    if (report.reporterId !== userId) {
+      throw new BadRequestException('You are not authorized to delete this report');
+    }
+
+    await this.db.update(reports)
+      .set({ status: 'REMOVED', updatedAt: new Date() })
+      .where(eq(reports.id, id));
+
+    return { success: true };
   }
 
   private getReportSelect(viewerId?: number) {

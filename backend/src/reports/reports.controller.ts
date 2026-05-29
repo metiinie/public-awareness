@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Request, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Request, Logger, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 
 @ApiTags('reports')
 @Controller('reports')
@@ -22,7 +23,7 @@ export class ReportsController {
 
   @Get()
 
-  @UseGuards(JwtAuthGuard) // Optional context but helpful for votes if logged in
+  @UseGuards(OptionalJwtAuthGuard) // Optional context but helpful for votes if logged in
   @ApiOperation({ summary: 'Get all reports with filters' })
   findAll(@Query() filters: FilterReportDto, @Request() req) {
     return this.reportsService.findAll({ ...filters, viewerId: req.user?.userId });
@@ -53,7 +54,7 @@ export class ReportsController {
   }
 
   @Get(':id')
-  @UseGuards(JwtAuthGuard) // Adding guard to ensure user context for voting status
+  @UseGuards(OptionalJwtAuthGuard) // Adding guard to ensure user context for voting status
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get a single report by ID' })
   findOne(@Param('id') id: string, @Request() req) {
@@ -98,5 +99,13 @@ export class ReportsController {
   @ApiOperation({ summary: 'Flag a comment for moderation' })
   flagComment(@Param('id') id: string, @Param('commentId') commentId: string, @Body('reason') reason: string, @Request() req) {
     return this.reportsService.flagComment(+id, +commentId, req.user.userId, reason);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Delete a report' })
+  remove(@Param('id') id: string, @Request() req) {
+    return this.reportsService.remove(+id, req.user.userId);
   }
 }

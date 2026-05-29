@@ -43,6 +43,19 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Google Single Sign-On' })
+  @ApiResponse({ status: 200, description: 'Successfully logged in with Google.' })
+  @ApiResponse({ status: 401, description: 'Invalid Google ID token.' })
+  googleLogin(@Body() body: { idToken: string }) {
+    if (!body.idToken) {
+      throw new Error('idToken is required');
+    }
+    return this.authService.googleLogin(body.idToken);
+  }
+
   @Patch('profile')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
