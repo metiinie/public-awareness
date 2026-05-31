@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Inject } from '@nestjs/common';
+import { Controller, Get, Param, Inject, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { cities, areas, categories } from '../db/schema';
@@ -17,8 +17,8 @@ export class MetaController {
 
   @Get('cities/:id/areas')
   @ApiOperation({ summary: 'Get areas for a city' })
-  async getAreas(@Param('id') cityId: string) {
-    return this.db.select().from(areas).where(eq(areas.cityId, +cityId));
+  async getAreas(@Param('id', ParseIntPipe) cityId: number) {
+    return this.db.select().from(areas).where(eq(areas.cityId, cityId));
   }
 
   @Get('categories')

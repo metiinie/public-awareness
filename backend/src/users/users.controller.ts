@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Post, Delete, Body, UseGuards, Req, Param, Pars
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthService } from '../auth/auth.service';
+import { UpdateProfileDto, NotificationSettingsDto } from '../auth/dto/auth.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -17,7 +18,7 @@ export class UsersController {
   }
 
   @Patch('profile')
-  async updateProfile(@Req() req: any, @Body() data: any) {
+  async updateProfile(@Req() req: any, @Body() data: UpdateProfileDto) {
     const updatedUser = await this.usersService.updateProfile(req.user.userId, data);
     return this.authService.generateToken(updatedUser);
   }
@@ -33,7 +34,7 @@ export class UsersController {
   }
 
   @Patch('notification-settings')
-  updateNotificationSettings(@Req() req: any, @Body() settings: any) {
+  updateNotificationSettings(@Req() req: any, @Body() settings: NotificationSettingsDto) {
     return this.usersService.updateNotificationSettings(req.user.userId, settings);
   }
   

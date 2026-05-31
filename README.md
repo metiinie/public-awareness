@@ -1,6 +1,6 @@
-# CivicWatch — Public Awareness & Issue Discovery
+# Civic Eye — Public Awareness & Issue Discovery
 
-CivicWatch is a community-driven infrastructure reporting platform that uses an **Evidence-First** and **Trust-Based** model to help citizens discover and validate local problems.
+Civic Eye is a community-driven infrastructure reporting platform that uses an **Evidence-First** and **Trust-Based** model to help citizens discover and validate local problems.
 
 ## 🚀 Core System Logic (MVP)
 

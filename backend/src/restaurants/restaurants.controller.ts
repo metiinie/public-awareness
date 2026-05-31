@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Param, Inject } from '@nestjs/common';
+import { Controller, Get, Query, Param, Inject, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { restaurants, areas, cities } from '../db/schema';
@@ -55,7 +55,7 @@ export class RestaurantsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a single restaurant by ID' })
-  async getRestaurant(@Param('id') id: string) {
+  async getRestaurant(@Param('id', ParseIntPipe) id: number) {
     const result = await this.db
       .select({
         id: restaurants.id,
@@ -73,7 +73,7 @@ export class RestaurantsController {
       .from(restaurants)
       .leftJoin(cities, eq(restaurants.cityId, cities.id))
       .leftJoin(areas, eq(restaurants.areaId, areas.id))
-      .where(eq(restaurants.id, +id));
+      .where(eq(restaurants.id, id));
 
     return result[0] ?? null;
   }

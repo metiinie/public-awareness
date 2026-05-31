@@ -1,5 +1,5 @@
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -22,15 +22,19 @@ async function bootstrap() {
     const httpAdapterHost = app.get(HttpAdapterHost);
     app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
 
-    const allowedOrigins = configService.get<string>('ALLOWED_ORIGINS')?.split(',') || '*';
+    const allowedOrigins = configService.get<string>('ALLOWED_ORIGINS')?.split(',').filter(Boolean) || [];
     app.enableCors({
-      origin: allowedOrigins,
+      origin: allowedOrigins.length > 0 ? allowedOrigins : true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
       credentials: true,
     });
 
-    app.useGlobalPipes(new ValidationPipe({ transform: true }));
+    app.useGlobalPipes(new ValidationPipe({
+      transform: true,
+      whitelist: true,               // strips any properties not defined in the DTO
+      forbidNonWhitelisted: true,    // returns 400 if unknown properties are sent
+    }));
     app.setGlobalPrefix('api');
 
     const config = new DocumentBuilder()
@@ -43,9 +47,9 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
 
     await app.listen(process.env.PORT || 3000, '0.0.0.0');
-    console.log(`Application is running on port: ${process.env.PORT || 3000}`);
+    Logger.log(`Application is running on port: ${process.env.PORT || 3000}`, 'Bootstrap');
   } catch (error) {
-    console.error('Error during application bootstrap:', error);
+    Logger.error('Error during application bootstrap:', error, 'Bootstrap');
     process.exit(1);
   }
 }

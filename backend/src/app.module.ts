@@ -22,6 +22,7 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { UsersModule } from './users/users.module';
 import { EmergencyModeGuard } from './auth/guards/emergency-mode.guard';
 import { RedisModule } from './redis/redis.module';
+import { MailModule } from './mail/mail.module';
 
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { WinstonModule } from 'nest-winston';
@@ -76,6 +77,7 @@ import * as winston from 'winston';
     FoodReviewsModule,
     AdminModule,
     UsersModule,
+    MailModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',

@@ -2,6 +2,8 @@ import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { comments, reports, users } from '../db/schema';
 import { eq, desc, and } from 'drizzle-orm';
+import { BadRequestException } from '@nestjs/common';
+const Filter = require('bad-words');
 
 @Injectable()
 export class CommentsService {
@@ -13,6 +15,11 @@ export class CommentsService {
 
         if (!report) {
             throw new NotFoundException('Report not found');
+        }
+
+        const filter = new Filter();
+        if (filter.isProfane(content)) {
+            throw new BadRequestException('Profanity is not allowed in comments.');
         }
 
         const [newComment] = await this.db.insert(comments).values({

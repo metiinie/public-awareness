@@ -114,10 +114,6 @@ export class FilterReportDto {
   @IsString()
   search?: string;
 
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  viewerId?: number;
 
   @ApiPropertyOptional({ example: 20 })
   @IsOptional()

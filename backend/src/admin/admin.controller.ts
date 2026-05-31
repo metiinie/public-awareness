@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Patch, Param, Body, Post, Query, Req, Header, Delete } from '@nestjs/common';
+import { Controller, Get, UseGuards, Patch, Param, Body, Post, Query, Req, Header, Delete , ParseIntPipe } from '@nestjs/common';
 import { Request } from 'express';
 
 import { AdminService } from './admin.service';
@@ -57,16 +57,16 @@ export class AdminController {
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('REPORT')
-  verifyReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.updateReportStatus(+id, 'VERIFIED', req.user.userId, reason, this.getIp(req));
+  verifyReport(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(id, 'VERIFIED', req.user.userId, reason, this.getIp(req));
   }
 
   @Post('reports/:id/remove')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard, AdminRateLimitGuard)
   @Scoped('REPORT')
-  removeReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.updateReportStatus(+id, 'REMOVED', req.user.userId, reason, this.getIp(req));
+  removeReport(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(id, 'REMOVED', req.user.userId, reason, this.getIp(req));
   }
 
   @Get('reports/critical')
@@ -120,31 +120,31 @@ export class AdminController {
       status: query.status,
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
-    }, this.getScope(req));
+    }, this.getScope(req.user));
   }
 
   @Post('reports/:id/archive')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('REPORT')
-  archiveReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.archiveReport(+id, req.user.userId, reason);
+  archiveReport(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.archiveReport(id, req.user.userId, reason);
   }
 
   @Post('reports/:id/request-evidence')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('REPORT')
-  requestMoreEvidence(@Param('id') id: string, @Body('message') message: string, @Req() req: any) {
-    return this.adminService.requestMoreEvidence(+id, req.user.userId, message);
+  requestMoreEvidence(@Param('id', ParseIntPipe) id: number, @Body('message') message: string, @Req() req: any) {
+    return this.adminService.requestMoreEvidence(id, req.user.userId, message);
   }
 
   @Post('reports/:id/merge')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('REPORT')
-  mergeReports(@Param('id') id: string, @Body('mergedIds') mergedIds: number[], @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.mergeReports(+id, mergedIds, req.user.userId, reason, req.user.cityId);
+  mergeReports(@Param('id', ParseIntPipe) id: number, @Body('mergedIds') mergedIds: number[], @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.mergeReports(id, mergedIds, req.user.userId, reason, req.user.cityId);
   }
 
   @Post('reports/bulk-status')
@@ -157,33 +157,33 @@ export class AdminController {
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard, AdminRateLimitGuard)
   @Scoped('REPORT')
-  updateReportStatus(@Param('id') id: string, @Body('status') status: any, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.updateReportStatus(+id, status, req.user.userId, reason, this.getIp(req));
+  updateReportStatus(@Param('id', ParseIntPipe) id: number, @Body('status') status: any, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.updateReportStatus(id, status, req.user.userId, reason, this.getIp(req));
   }
 
 
   @Post('reports/:id/restore')
   @Roles('SUPER_ADMIN')
-  restoreReport(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.restoreReport(+id, req.user.userId, reason, this.getIp(req));
+  restoreReport(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.restoreReport(id, req.user.userId, reason, this.getIp(req));
   }
 
   @Get('reports/:id/history')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  getReportHistory(@Param('id') id: string) {
-    return this.adminService.getReportHistory(+id);
+  getReportHistory(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.getReportHistory(id);
   }
 
   @Get('reports/:id/notes')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  getModerationNotes(@Param('id') id: string) {
-    return this.adminService.getModerationNotes(+id);
+  getModerationNotes(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.getModerationNotes(id);
   }
 
   @Post('reports/:id/notes')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  addModerationNote(@Param('id') id: string, @Body('content') content: string, @Req() req: any) {
-    return this.adminService.addModerationNote(+id, req.user.userId, content);
+  addModerationNote(@Param('id', ParseIntPipe) id: number, @Body('content') content: string, @Req() req: any) {
+    return this.adminService.addModerationNote(id, req.user.userId, content);
   }
 
 
@@ -211,63 +211,63 @@ export class AdminController {
 
   @Get('users/:id')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  getUserDetail(@Param('id') id: string) {
-    return this.adminService.getUserDetail(+id);
+  getUserDetail(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.getUserDetail(id);
   }
 
   @Patch('users/:id/role')
   @Roles('SUPER_ADMIN')
-  updateUserRole(@Param('id') id: string, @Body('role') role: 'USER' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMIN', @Req() req: any) {
-    return this.adminService.updateUserRole(+id, role, req.user.userId);
+  updateUserRole(@Param('id', ParseIntPipe) id: number, @Body('role') role: 'USER' | 'MODERATOR' | 'ADMIN' | 'SUPER_ADMIN', @Req() req: any) {
+    return this.adminService.updateUserRole(id, role, req.user.userId);
   }
 
   @Patch('users/:id/scope')
   @Roles('SUPER_ADMIN')
   updateUserScope(
-    @Param('id') id: string, 
+    @Param('id', ParseIntPipe) id: number, 
     @Body('cityId') cityId: number | null, 
     @Body('areaId') areaId: number | null, 
     @Req() req: any
   ) {
-    return this.adminService.updateUserScope(+id, cityId, areaId, req.user.userId);
+    return this.adminService.updateUserScope(id, cityId, areaId, req.user.userId);
   }
 
   @Post('users/:id/warn')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('USER')
-  warnUser(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.warnUser(+id, reason, req.user.userId, this.getIp(req));
+  warnUser(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.warnUser(id, reason, req.user.userId, this.getIp(req));
   }
 
   @Post('users/:id/suspend')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard, AdminRateLimitGuard)
   @Scoped('USER')
-  suspendUser(@Param('id') id: string, @Body('days') days: number, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.suspendUser(+id, days, reason, req.user.userId, this.getIp(req));
+  suspendUser(@Param('id', ParseIntPipe) id: number, @Body('days') days: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.suspendUser(id, days, reason, req.user.userId, this.getIp(req));
   }
 
   @Post('users/:id/ban')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard, AdminRateLimitGuard)
   @Scoped('USER')
-  banUser(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.banUser(+id, reason, req.user.userId, this.getIp(req));
+  banUser(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.banUser(id, reason, req.user.userId, this.getIp(req));
   }
 
   @Post('users/:id/reset-trust')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('USER')
-  resetTrustScore(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.resetTrustScore(+id, req.user.userId, reason, this.getIp(req));
+  resetTrustScore(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.resetTrustScore(id, req.user.userId, reason, this.getIp(req));
   }
 
   @Post('users/:id/restore')
   @Roles('SUPER_ADMIN')
-  restoreUser(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.restoreUser(+id, req.user.userId, reason, this.getIp(req));
+  restoreUser(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.restoreUser(id, req.user.userId, reason, this.getIp(req));
   }
 
   @Get('locations')
@@ -290,8 +290,8 @@ export class AdminController {
 
   @Patch('countries/:id')
   @Roles('SUPER_ADMIN')
-  updateCountry(@Param('id') id: string, @Body('name') name: string, @Req() req: any) {
-    return this.adminService.updateCountry(+id, name, req.user.userId);
+  updateCountry(@Param('id', ParseIntPipe) id: number, @Body('name') name: string, @Req() req: any) {
+    return this.adminService.updateCountry(id, name, req.user.userId);
   }
 
   @Get('cities')
@@ -329,14 +329,14 @@ export class AdminController {
 
   @Patch('cities/:id')
   @Roles('SUPER_ADMIN')
-  updateCity(@Param('id') id: string, @Body() data: any, @Req() req: any) {
-    return this.adminService.updateCity(+id, data, req.user.userId);
+  updateCity(@Param('id', ParseIntPipe) id: number, @Body() data: any, @Req() req: any) {
+    return this.adminService.updateCity(id, data, req.user.userId);
   }
 
   @Get('areas/:id/merge-preview')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  getMergePreview(@Param('id') id: string, @Query('targetId') targetId: string) {
-    return this.adminService.getMergePreview(+id, +targetId);
+  getMergePreview(@Param('id', ParseIntPipe) id: number, @Query('targetId') targetId: string) {
+    return this.adminService.getMergePreview(id, +targetId);
   }
 
   @Post('locations/import')
@@ -349,30 +349,30 @@ export class AdminController {
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard)
   @Scoped('AREA')
-  updateArea(@Param('id') id: string, @Body() data: any, @Req() req: any) {
-    return this.adminService.updateArea(+id, data, req.user.userId, this.getIp(req));
+  updateArea(@Param('id', ParseIntPipe) id: number, @Body() data: any, @Req() req: any) {
+    return this.adminService.updateArea(id, data, req.user.userId, this.getIp(req));
   }
 
   @Post('areas/:id/merge')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard, AdminRateLimitGuard)
   @Scoped('AREA')
-  mergeAreas(@Param('id') id: string, @Body('targetId') targetId: number, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.mergeAreas(+id, targetId, req.user.userId, reason, this.getIp(req), req.user.cityId);
+  mergeAreas(@Param('id', ParseIntPipe) id: number, @Body('targetId') targetId: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.mergeAreas(id, targetId, req.user.userId, reason, this.getIp(req), req.user.cityId);
   }
 
   @Post('areas/:id/disable')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
   @UseGuards(ScopeGuard, AdminRateLimitGuard)
   @Scoped('AREA')
-  disableArea(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.disableArea(+id, req.user.userId, reason, this.getIp(req));
+  disableArea(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.disableArea(id, req.user.userId, reason, this.getIp(req));
   }
 
   @Post('areas/:id/restore')
   @Roles('SUPER_ADMIN')
-  restoreArea(@Param('id') id: string, @Body('reason') reason: string, @Req() req: any) {
-    return this.adminService.restoreArea(+id, req.user.userId, reason, this.getIp(req));
+  restoreArea(@Param('id', ParseIntPipe) id: number, @Body('reason') reason: string, @Req() req: any) {
+    return this.adminService.restoreArea(id, req.user.userId, reason, this.getIp(req));
   }
 
   @Get('categories')
@@ -389,8 +389,8 @@ export class AdminController {
 
   @Patch('categories/:id')
   @Roles('SUPER_ADMIN')
-  updateCategory(@Param('id') id: string, @Body() data: any, @Req() req: any) {
-    return this.adminService.updateCategory(+id, data, req.user.userId);
+  updateCategory(@Param('id', ParseIntPipe) id: number, @Body() data: any, @Req() req: any) {
+    return this.adminService.updateCategory(id, data, req.user.userId);
   }
 
   @Post('broadcast')
@@ -415,8 +415,8 @@ export class AdminController {
 
   @Post('profile/sessions/:id/revoke')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  revokeSession(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.revokeSession(+id, req.user.userId);
+  revokeSession(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.adminService.revokeSession(id, req.user.userId);
   }
 
   @Get('profile/api-keys')
@@ -433,8 +433,8 @@ export class AdminController {
 
   @Delete('profile/api-keys/:id')
   @Roles('SUPER_ADMIN')
-  deleteApiKey(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.deleteApiKey(+id, req.user.userId);
+  deleteApiKey(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.adminService.deleteApiKey(id, req.user.userId);
   }
 
   @Post('profile/switch-scope')
@@ -528,14 +528,14 @@ export class AdminController {
 
   @Patch('restaurants/:id')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  updateRestaurant(@Param('id') id: string, @Body() data: any, @Req() req: any) {
-    return this.adminService.updateRestaurant(+id, data, req.user.userId);
+  updateRestaurant(@Param('id', ParseIntPipe) id: number, @Body() data: any, @Req() req: any) {
+    return this.adminService.updateRestaurant(id, data, req.user.userId);
   }
 
   @Delete('restaurants/:id')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  deleteRestaurant(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.deleteRestaurant(+id, req.user.userId);
+  deleteRestaurant(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.adminService.deleteRestaurant(id, req.user.userId);
   }
 
   @Get('food-reviews')
@@ -554,8 +554,8 @@ export class AdminController {
 
   @Delete('food-reviews/:id')
   @Roles('ADMIN', 'MODERATOR', 'SUPER_ADMIN')
-  deleteFoodReview(@Param('id') id: string, @Req() req: any) {
-    return this.adminService.deleteFoodReview(+id, req.user.userId);
+  deleteFoodReview(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    return this.adminService.deleteFoodReview(id, req.user.userId);
   }
 }
 

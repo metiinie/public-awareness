@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, UseGuards, Request, Query } from '@nestjs/common';
+import { Controller, Get, Patch, Param, UseGuards, Request, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,9 +33,9 @@ export class NotificationsController {
     @UseGuards(JwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Mark a notification as read' })
-    markAsRead(@Param('id') id: string, @Request() req) {
+    markAsRead(@Param('id', ParseIntPipe) id: number, @Request() req) {
         try {
-            return this.notificationsService.markAsRead(+id, req.user.userId);
+            return this.notificationsService.markAsRead(id, req.user.userId);
         } catch (error) {
             console.error('Error marking notification as read:', id, error);
             throw error;

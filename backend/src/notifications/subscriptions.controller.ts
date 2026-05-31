@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, UseGuards, Request, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,7 +32,7 @@ export class SubscriptionsController {
     @UseGuards(JwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Unsubscribe' })
-    unsubscribe(@Param('id') id: string, @Request() req) {
-        return this.notificationsService.unsubscribe(req.user.userId, +id);
+    unsubscribe(@Param('id', ParseIntPipe) id: number, @Request() req) {
+        return this.notificationsService.unsubscribe(req.user.userId, id);
     }
 }

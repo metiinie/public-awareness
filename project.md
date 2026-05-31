@@ -1,9 +1,9 @@
-# CivicWatch: Community-Powered Public Awareness Platform
+# Civic Eye: Community-Powered Public Awareness Platform
 
-CivicWatch is a comprehensive full-stack mobile application designed to empower citizens to report and discover local infrastructure issues, public service delays, and community-relevant events. It operates on an **Evidence-First** and **Trust-Based** model, ensuring that all reported information is high-quality and verified by the community.
+Civic Eye is a comprehensive full-stack mobile application designed to empower citizens to report and discover local infrastructure issues, public service delays, and community-relevant events. It operates on an **Evidence-First** and **Trust-Based** model, ensuring that all reported information is high-quality and verified by the community.
 
 ## 📱 Application Overview
-**CivicWatch** bridges the gap between citizens and city maintenance by providing a real-time, transparent platform for issue discovery. Unlike traditional reporting tools, it avoids complex geographic mapping in favor of a structured administrative hierarchy, making it highly organized and accessible.
+**Civic Eye** bridges the gap between citizens and city maintenance by providing a real-time, transparent platform for issue discovery. Unlike traditional reporting tools, it avoids complex geographic mapping in favor of a structured administrative hierarchy, making it highly organized and accessible.
 
 ---
 

@@ -1,9 +1,10 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger, ForbiddenException } from '@nestjs/common';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import { reports, media, reactions, users, categories, areas, cities, comments, moderationReports, foodReviews, restaurants, savedReports, systemSettings } from '../db/schema';
-import { eq, and, or, desc, sql, SQL, lte, ne, lt } from 'drizzle-orm';
+import { eq, and, or, desc, sql, SQL, lte, ne, lt, inArray } from 'drizzle-orm';
 import { CreateReportDto, FilterReportDto } from './dto/report.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+const Filter = require('bad-words');
 
 @Injectable()
 export class ReportsService {
@@ -33,7 +34,17 @@ export class ReportsService {
 
     // --- Auto Archiving Logic ---
     let archiveHours = 24;
-    if (createReportDto.categoryId === 1) archiveHours = 6;
+    try {
+      const [configRow] = await this.db.select().from(sql`system_settings`).where(sql`key = 'archive_config'`).limit(1);
+      if (configRow?.value) {
+        const archiveConfig = JSON.parse(configRow.value);
+        archiveHours = archiveConfig[createReportDto.categoryId] || archiveConfig.default || 24;
+      } else {
+        if (createReportDto.categoryId === 1) archiveHours = 6;
+      }
+    } catch (e) {
+      if (createReportDto.categoryId === 1) archiveHours = 6;
+    }
 
     const autoArchiveAt = new Date();
     autoArchiveAt.setHours(autoArchiveAt.getHours() + archiveHours);
@@ -43,11 +54,8 @@ export class ReportsService {
     const userTrust = userRecord?.trustScore ?? 50;
     
     // --- Profanity Check ---
-    const forbiddenWords = ['badword1', 'badword2', 'spam', 'fakeinfo'];
-    const hasProfanity = forbiddenWords.some(word => 
-      (reportData.title || '').toLowerCase().includes(word) || 
-      (reportData.description || '').toLowerCase().includes(word)
-    );
+    const filter = new Filter();
+    const hasProfanity = filter.isProfane(reportData.title || '') || filter.isProfane(reportData.description || '');
 
     let initialStatus = 'REPORTED';
     if (reportData.urgency === 'CRITICAL' || userTrust < 20 || hasProfanity) {
@@ -109,11 +117,14 @@ export class ReportsService {
           mediaUrls: mediaUrls || [],
         });
 
-        // Update restaurant averages
-        const existingReviews = await this.db.select().from(foodReviews).where(eq(foodReviews.restaurantId, restaurantId));
-        const currentCount = existingReviews.length;
-        const sumRating = existingReviews.reduce((acc: any, review: any) => acc + review.rating, 0);
-        const newAvg = currentCount > 0 ? (sumRating / currentCount) : rating;
+        // Update restaurant averages with SQL aggregate
+        const [aggregate] = await this.db.select({
+          count: sql`count(*)`,
+          avg: sql`avg(rating)`
+        }).from(foodReviews).where(eq(foodReviews.restaurantId, restaurantId));
+        
+        const currentCount = Number(aggregate?.count || 0);
+        const newAvg = Number(aggregate?.avg || rating);
 
         await this.db.update(restaurants)
           .set({
@@ -141,7 +152,7 @@ export class ReportsService {
     }
   }
 
-  async findAll(filters: FilterReportDto) {
+  async findAll(filters: FilterReportDto & { viewerId?: number }) {
     const { categoryId, cityId, areaId, status, reporterId, sortBy = 'createdAt', order = 'desc' } = filters;
 
     let query = this.db.select(this.getReportSelect(filters.viewerId))
@@ -206,10 +217,10 @@ export class ReportsService {
         );
         break;
       case 'votes':
-        // Trending Algorithm: (Actual Votes - Fake Votes) / (Hours + 2)^1.8
+        // Trending Algorithm uses cached vote columns instead of subqueries
         query = query.orderBy(sortOrder === 'desc' ? 
-          desc(sql`((SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'REAL') - (SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'FAKE')) / pow((extract(epoch from (now() - ${reports.createdAt}))/3600) + 2, 1.8)`) : 
-          sql`((SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'REAL') - (SELECT count(*) FROM reactions WHERE report_id = ${reports.id} AND type = 'FAKE')) / pow((extract(epoch from (now() - ${reports.createdAt}))/3600) + 2, 1.8)`
+          desc(sql`(${reports.realVotes} - ${reports.fakeVotes}) / pow((extract(epoch from (now() - ${reports.createdAt}))/3600) + 2, 1.8)`) : 
+          sql`(${reports.realVotes} - ${reports.fakeVotes}) / pow((extract(epoch from (now() - ${reports.createdAt}))/3600) + 2, 1.8)`
         );
         break;
       default:
@@ -224,16 +235,18 @@ export class ReportsService {
 
     const results = await query;
     
-    // Hydrate media for each report
-    const hydrated = await Promise.all(results.map(async (r: any) => {
-      const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
-      return {
-        ...r,
-        media: mediaItems,
-      };
-    }));
+    // Batch-fetch media for all reports in a single query (eliminates N+1)
+    const reportIds = results.map((r: any) => r.id);
+    let mediaMap: Record<number, any[]> = {};
+    if (reportIds.length > 0) {
+      const allMedia = await this.db.select().from(media).where(inArray(media.reportId, reportIds));
+      for (const m of allMedia) {
+        if (!mediaMap[m.reportId]) mediaMap[m.reportId] = [];
+        mediaMap[m.reportId].push(m);
+      }
+    }
 
-    return hydrated;
+    return results.map((r: any) => ({ ...r, media: mediaMap[r.id] || [] }));
   }
 
   async findVotingHistory(userId: number) {
@@ -263,20 +276,38 @@ export class ReportsService {
     .where(eq(reactions.userId, userId))
     .orderBy(desc(reactions.id));
 
-    // For voting history, we need the counts for each report
-    const hydrated = await Promise.all(results.map(async (r) => {
-      const votes = await this.db.select().from(reactions).where(eq(reactions.reportId, r.id));
-      const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
-      return {
-        ...r,
-        media: mediaItems,
-        votesReal: votes.filter((v: any) => v.type === 'REAL').length,
-        votesFake: votes.filter((v: any) => v.type === 'FAKE').length,
-        commentCount: 0, // Simplified
-      };
-    }));
+    // Batch-fetch media and vote counts for all reports (eliminates N+1)
+    const reportIds = results.map((r: any) => r.id);
+    let mediaMap: Record<number, any[]> = {};
+    let voteMap: Record<number, { real: number; fake: number }> = {};
+    if (reportIds.length > 0) {
+      const allMedia = await this.db.select().from(media).where(inArray(media.reportId, reportIds));
+      for (const m of allMedia) {
+        if (!mediaMap[m.reportId]) mediaMap[m.reportId] = [];
+        mediaMap[m.reportId].push(m);
+      }
 
-    return hydrated;
+      const voteCounts = await this.db.select({
+        reportId: reactions.reportId,
+        type: reactions.type,
+        count: sql<number>`count(*)::int`,
+      }).from(reactions)
+        .where(inArray(reactions.reportId, reportIds))
+        .groupBy(reactions.reportId, reactions.type);
+      for (const v of voteCounts) {
+        if (!voteMap[v.reportId]) voteMap[v.reportId] = { real: 0, fake: 0 };
+        if (v.type === 'REAL') voteMap[v.reportId].real = v.count;
+        if (v.type === 'FAKE') voteMap[v.reportId].fake = v.count;
+      }
+    }
+
+    return results.map((r: any) => ({
+      ...r,
+      media: mediaMap[r.id] || [],
+      votesReal: voteMap[r.id]?.real || 0,
+      votesFake: voteMap[r.id]?.fake || 0,
+      commentCount: 0,
+    }));
   }
 
   async findOne(id: number, userId?: number) {
@@ -342,6 +373,18 @@ export class ReportsService {
   }
 
   async vote(reportId: number, userId: number, type: 'REAL' | 'FAKE' | 'LIKE') {
+    if (!['REAL', 'FAKE', 'LIKE'].includes(type)) {
+      throw new BadRequestException('Invalid vote type');
+    }
+
+    const [report] = await this.db.select().from(reports).where(eq(reports.id, reportId)).limit(1);
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+    if (report.reporterId === userId) {
+      throw new ForbiddenException('Cannot vote on your own report');
+    }
+
     // Check if already voted
     const [existing] = await this.db.select().from(reactions).where(
       and(eq(reactions.reportId, reportId), eq(reactions.userId, userId))
@@ -358,6 +401,9 @@ export class ReportsService {
     } else {
       await this.db.insert(reactions).values({ reportId, userId, type });
     }
+
+    // Sync cached vote counts on the report row
+    await this.syncVoteCounts(reportId);
 
     // Recalculate Confidence Score and Update User Trust (only for REAL/FAKE votes)
     if (type !== 'LIKE') {
@@ -435,7 +481,7 @@ export class ReportsService {
     const finalConfidence = Math.round(confidenceValue * 100);
 
     await this.db.update(reports)
-      .set({ confidenceScore: finalConfidence })
+      .set({ confidenceScore: finalConfidence, realVotes: realVotes, fakeVotes: totalVotes - realVotes })
       .where(eq(reports.id, reportId));
 
     // --- Trust Score Logic ---
@@ -468,7 +514,21 @@ export class ReportsService {
     }
   }
 
-  async getSubscribedReports(userId: number, filters?: FilterReportDto) {
+  private async syncVoteCounts(reportId: number) {
+    const [counts] = await this.db.select({
+      realVotes: sql<number>`count(*) FILTER (WHERE ${reactions.type} = 'REAL')`,
+      fakeVotes: sql<number>`count(*) FILTER (WHERE ${reactions.type} = 'FAKE')`,
+    }).from(reactions).where(eq(reactions.reportId, reportId));
+
+    await this.db.update(reports)
+      .set({
+        realVotes: Number(counts?.realVotes || 0),
+        fakeVotes: Number(counts?.fakeVotes || 0),
+      })
+      .where(eq(reports.id, reportId));
+  }
+
+  async getSubscribedReports(userId: number, filters?: FilterReportDto & { viewerId?: number }) {
     const userSubscriptions = await this.notificationsService.getSubscriptions(userId);
     
     if (userSubscriptions.length === 0) {
@@ -530,14 +590,17 @@ export class ReportsService {
       nextCursor = nextItem.id;
     }
     
-    // Hydrate media
-    const hydratedItems = await Promise.all(results.map(async (r: any) => {
-      const mediaItems = await this.db.select().from(media).where(eq(media.reportId, r.id));
-      return {
-        ...r,
-        media: mediaItems,
-      };
-    }));
+    // Batch-fetch media (eliminates N+1)
+    const reportIds = results.map((r: any) => r.id);
+    let mediaMap: Record<number, any[]> = {};
+    if (reportIds.length > 0) {
+      const allMedia = await this.db.select().from(media).where(inArray(media.reportId, reportIds));
+      for (const m of allMedia) {
+        if (!mediaMap[m.reportId]) mediaMap[m.reportId] = [];
+        mediaMap[m.reportId].push(m);
+      }
+    }
+    const hydratedItems = results.map((r: any) => ({ ...r, media: mediaMap[r.id] || [] }));
 
     return { items: hydratedItems, nextCursor };
   }
@@ -690,9 +753,9 @@ export class ReportsService {
         fullName: users.fullName,
         trustScore: users.trustScore,
       },
-      votesReal: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'REAL')`,
-      votesFake: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'FAKE')`,
-      likeCount: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'LIKE')`,
+      votesReal: reports.realVotes,
+      votesFake: reports.fakeVotes,
+      likeCount: sql<number>`(SELECT count(*)::int FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.type = 'LIKE')`,  
       commentCount: sql<number>`(SELECT count(*)::int FROM comments WHERE comments.report_id = ${reports.id})`,
       userVote: viewerId ? sql<string | null>`(SELECT reactions.type FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} AND (reactions.type = 'REAL' OR reactions.type = 'FAKE') LIMIT 1)` : sql`NULL`,
       userLiked: viewerId ? sql<boolean>`EXISTS(SELECT 1 FROM reactions WHERE reactions.report_id = ${reports.id} AND reactions.user_id = ${viewerId} AND reactions.type = 'LIKE')` : sql`FALSE`,

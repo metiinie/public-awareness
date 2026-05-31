@@ -1,10 +1,11 @@
-import { pgTable, serial, text, timestamp, integer, boolean, pgEnum, varchar, index, real } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { pgTable, serial, text, timestamp, integer, boolean, pgEnum, varchar, index, uniqueIndex, real, check } from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
 
 export const userRoleEnum = pgEnum('user_role', ['USER', 'ADMIN', 'MODERATOR', 'SUPER_ADMIN']);
 
 export const accountStatusEnum = pgEnum('account_status', ['ACTIVE', 'SUSPENDED', 'BANNED']);
 export const reportStatusEnum = pgEnum('report_status', ['REPORTED', 'UNDER_REVIEW', 'REMOVED', 'VERIFIED', 'RESOLVED', 'ARCHIVED']);
+export const moderationStatusEnum = pgEnum('moderation_status', ['PENDING', 'RESOLVED', 'DISMISSED']);
 
 
 export const urgencyEnum = pgEnum('urgency_level', ['INFO', 'WARNING', 'CRITICAL']);
@@ -39,6 +40,8 @@ export const users = pgTable('users', {
   appealReason: text('appeal_reason'),
   mfaEnabled: boolean('mfa_enabled').default(false).notNull(),
   mfaSecret: text('mfa_secret'),
+  isVerified: boolean('is_verified').default(false).notNull(),
+  verificationToken: text('verification_token'),
   moderationPreferences: text('moderation_preferences').default('{"autoOpenCritical":true,"confidenceThreshold":30,"showDuplicateSuggestions":true,"defaultFilter":"assigned_areas"}'),
 });
 
@@ -84,7 +87,7 @@ export const areas = pgTable('areas', {
   name: varchar('name', { length: 100 }).notNull(),
   cityId: integer('city_id').references(() => cities.id).notNull(),
   isActive: boolean('is_active').default(true).notNull(),
-  mergedToId: integer('merged_to_id'), // Self-referencing FK for merged areas
+  mergedToId: integer('merged_to_id').references((): any => areas.id), // Self-referencing FK for merged areas
   aliases: text('aliases').array(), // Array of old names
 });
 
@@ -108,6 +111,8 @@ export const reports = pgTable('reports', {
   longitude: real('longitude'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  realVotes: integer('real_votes').default(0).notNull(),
+  fakeVotes: integer('fake_votes').default(0).notNull(),
   autoArchiveAt: timestamp('auto_archive_at'),
 }, (table) => {
   return {
@@ -125,7 +130,7 @@ export const reports = pgTable('reports', {
 // --- Moderation Notes ---
 export const moderationNotes = pgTable('moderation_notes', {
   id: serial('id').primaryKey(),
-  reportId: integer('report_id').references(() => reports.id).notNull(),
+  reportId: integer('report_id').references(() => reports.id, { onDelete: 'cascade' }).notNull(),
   adminId: integer('admin_id').references(() => users.id).notNull(),
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -174,7 +179,7 @@ export const apiKeys = pgTable('api_keys', {
 // ... existing media table ...
 export const media = pgTable('media', {
   id: serial('id').primaryKey(),
-  reportId: integer('report_id').references(() => reports.id).notNull(),
+  reportId: integer('report_id').references(() => reports.id, { onDelete: 'cascade' }).notNull(),
   url: text('url').notNull(),
   type: varchar('type', { length: 50 }).notNull(), // 'IMAGE' | 'VIDEO'
 });
@@ -182,14 +187,14 @@ export const media = pgTable('media', {
 // --- Reactions ---
 export const reactions = pgTable('reactions', {
   id: serial('id').primaryKey(),
-  reportId: integer('report_id').references(() => reports.id).notNull(),
-  userId: integer('user_id').references(() => users.id).notNull(),
+  reportId: integer('report_id').references(() => reports.id, { onDelete: 'cascade' }).notNull(),
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   type: varchar('type', { length: 10 }).notNull(), // 'REAL' | 'FAKE'
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => {
   return {
     reportIdx: index('reaction_report_idx').on(table.reportId),
-    userReportIdx: index('reaction_user_report_idx').on(table.userId, table.reportId),
+    userReportIdx: uniqueIndex('reaction_user_report_idx').on(table.userId, table.reportId),
   };
 });
 
@@ -200,27 +205,29 @@ export const subscriptions = pgTable('subscriptions', {
   areaId: integer('area_id').references(() => areas.id),
   categoryId: integer('category_id').references(() => categories.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  userAreaCategoryIdx: uniqueIndex('subscriptions_user_area_category_idx').on(table.userId, table.areaId, table.categoryId),
+}));
 
 // --- Moderation Reports ---
 export const moderationReports = pgTable('moderation_reports', {
   id: serial('id').primaryKey(),
   reportId: integer('report_id').references(() => reports.id).notNull(),
-  commentId: integer('comment_id').references(() => comments.id), // Optional: present only if flagging a specific comment
+  commentId: integer('comment_id').references(() => comments.id, { onDelete: 'cascade' }), // Optional: present only if flagging a specific comment
   reason: text('reason').notNull(),
-  reporterId: integer('reporter_id').references(() => users.id).notNull(),
-  status: varchar('status', { length: 50 }).default('PENDING').notNull(), // PENDING, RESOLVED, DISMISSED
+  reporterId: integer('reporter_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  status: moderationStatusEnum('status').default('PENDING').notNull(), // PENDING, RESOLVED, DISMISSED
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // --- Saved Reports ---
 export const savedReports = pgTable('saved_reports', {
   id: serial('id').primaryKey(),
-  userId: integer('user_id').references(() => users.id).notNull(),
-  reportId: integer('report_id').references(() => reports.id).notNull(),
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  reportId: integer('report_id').references(() => reports.id, { onDelete: 'cascade' }).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => ({
-  userReportIdx: index('saved_report_user_report_idx').on(table.userId, table.reportId),
+  userReportIdx: uniqueIndex('saved_report_user_report_idx').on(table.userId, table.reportId),
 }));
 
 // --- Audit Logs ---
@@ -237,8 +244,8 @@ export const auditLogs = pgTable('audit_logs', {
 // --- Comments ---
 export const comments = pgTable('comments', {
   id: serial('id').primaryKey(),
-  reportId: integer('report_id').references(() => reports.id).notNull(),
-  userId: integer('user_id').references(() => users.id).notNull(),
+  reportId: integer('report_id').references(() => reports.id, { onDelete: 'cascade' }).notNull(),
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   content: text('content').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 }, (table) => {
@@ -419,6 +426,7 @@ export const foodReviews = pgTable('food_reviews', {
 }, (table) => ({
   restaurantIdx: index('food_review_restaurant_idx').on(table.restaurantId),
   userIdx: index('food_review_user_idx').on(table.userId),
+  ratingCheck: check('rating_check', sql`${table.rating} >= 1 AND ${table.rating} <= 5`),
 }));
 
 export const restaurantsRelations = relations(restaurants, ({ one, many }) => ({

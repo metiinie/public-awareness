@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Request, Patch } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Get, UseGuards, Request, Patch, Query, BadRequestException, Logger } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
@@ -8,6 +8,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
   constructor(private readonly authService: AuthService) { }
 
   @Get('me')
@@ -19,7 +20,7 @@ export class AuthController {
     try {
       return this.authService.getProfile(req.user.userId);
     } catch (error) {
-      console.error('Error fetching profile for user:', req.user.userId, error);
+      this.logger.error(`Error fetching profile for user: ${req.user.userId}`, error);
       throw error;
     }
   }
@@ -43,6 +44,29 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'User logout' })
+  @ApiResponse({ status: 200, description: 'Successfully logged out.' })
+  logout(@Request() req) {
+    // req.headers.authorization should exist because of JwtAuthGuard
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token) {
+      return this.authService.logout(token);
+    }
+    return { success: true };
+  }
+
+  @Get('verify-email')
+  @ApiOperation({ summary: 'Verify email address' })
+  @ApiResponse({ status: 200, description: 'Email verified successfully.' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired token.' })
+  verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
+  }
+
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('google')
   @HttpCode(HttpStatus.OK)
@@ -51,7 +75,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid Google ID token.' })
   googleLogin(@Body() body: { idToken: string }) {
     if (!body.idToken) {
-      throw new Error('idToken is required');
+      throw new BadRequestException('idToken is required');
     }
     return this.authService.googleLogin(body.idToken);
   }
@@ -66,7 +90,7 @@ export class AuthController {
     try {
       return this.authService.updateProfile(req.user.userId, updateProfileDto);
     } catch (error) {
-      console.error('Error updating profile for user:', req.user.userId, error);
+      this.logger.error(`Error updating profile for user: ${req.user.userId}`, error);
       throw error;
     }
   }
@@ -97,7 +121,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid token or code.' })
   verifyMfa(@Body() mfaDto: MfaCodeDto) {
     if (!mfaDto.mfaToken) {
-      throw new Error('mfaToken is required for verification');
+      throw new BadRequestException('mfaToken is required for verification');
     }
     return this.authService.verifyMfa(mfaDto.mfaToken, mfaDto.code);
   }

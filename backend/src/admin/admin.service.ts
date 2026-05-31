@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common';
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { DRIZZLE_PROVIDER } from '../db/db.module';
 import * as schema from '../db/schema';
@@ -284,16 +284,25 @@ export class AdminService {
   }
 
   async bulkUpdateStatus(ids: number[], status: any, adminId: number, reason: string, adminCityId?: number | null) {
-    if (adminCityId) {
-      const targetReports = await this.db
-        .select({ cityId: schema.reports.cityId })
-        .from(schema.reports)
-        .where(inArray(schema.reports.id, ids));
-      
-      for (const r of targetReports) {
-        if (r.cityId !== adminCityId) {
-          throw new Error('Unauthorized: One or more reports are outside your assigned city scope');
-        }
+    const allowedTransitions: Record<string, string[]> = {
+      'REPORTED': ['UNDER_REVIEW', 'VERIFIED', 'REMOVED', 'ARCHIVED'],
+      'UNDER_REVIEW': ['VERIFIED', 'REMOVED', 'ARCHIVED'],
+      'VERIFIED': ['RESOLVED', 'REMOVED', 'ARCHIVED'],
+      'RESOLVED': ['ARCHIVED'],
+      'REMOVED': ['REPORTED'],
+      'ARCHIVED': ['REPORTED']
+    };
+    const targetReports = await this.db
+      .select({ id: schema.reports.id, cityId: schema.reports.cityId, status: schema.reports.status })
+      .from(schema.reports)
+      .where(inArray(schema.reports.id, ids));
+    
+    for (const r of targetReports) {
+      if (adminCityId && r.cityId !== adminCityId) {
+        throw new Error('Unauthorized: One or more reports are outside your assigned city scope');
+      }
+      if (r.status !== status && !allowedTransitions[r.status]?.includes(status)) {
+        throw new BadRequestException(`Cannot transition report #${r.id} from ${r.status} to ${status}`);
       }
     }
 
@@ -399,6 +408,19 @@ export class AdminService {
       with: { area: true, category: true }
     });
     if (!report) throw new Error('Report not found');
+
+    const allowedTransitions: Record<string, string[]> = {
+      'REPORTED': ['UNDER_REVIEW', 'VERIFIED', 'REMOVED', 'ARCHIVED'],
+      'UNDER_REVIEW': ['VERIFIED', 'REMOVED', 'ARCHIVED'],
+      'VERIFIED': ['RESOLVED', 'REMOVED', 'ARCHIVED'],
+      'RESOLVED': ['ARCHIVED'],
+      'REMOVED': ['REPORTED'],
+      'ARCHIVED': ['REPORTED']
+    };
+
+    if (report.status !== status && !allowedTransitions[report.status]?.includes(status)) {
+      throw new BadRequestException(`Cannot transition report from ${report.status} to ${status}`);
+    }
 
     const result = await this.db
       .update(schema.reports)

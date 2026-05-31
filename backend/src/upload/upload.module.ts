@@ -20,7 +20,7 @@ import { CloudinaryStorage } from 'multer-storage-cloudinary';
         const storage = new CloudinaryStorage({
           cloudinary: cloudinary,
           params: {
-            folder: 'civicwatch-reports',
+            folder: 'civiceye-reports',
             resource_type: 'auto',
           } as any,
         });

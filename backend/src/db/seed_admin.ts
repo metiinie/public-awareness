@@ -26,7 +26,7 @@ async function seedAdmin() {
     const hashedPassword = await bcrypt.hash(seedPassword, 10);
     console.log('Password hashed successfully.');
 
-    const adminEmail = 'admin@civicwatch.com';
+    const adminEmail = 'admin@civiceye.com';
     
     // Check if admin exists
     const existingAdmins = await db.select().from(schema.users).where(eq(schema.users.email, adminEmail));
@@ -50,7 +50,7 @@ async function seedAdmin() {
     }
 
     // Attempt SUPER_ADMIN
-    const superAdminEmail = 'superadmin@civicwatch.com';
+    const superAdminEmail = 'superadmin@civiceye.com';
     const existingSuper = await db.select().from(schema.users).where(eq(schema.users.email, superAdminEmail));
     
     if (existingSuper.length === 0) {

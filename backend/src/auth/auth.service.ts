@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, Inject } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -9,15 +9,22 @@ import { LoginDto, RegisterDto, UpdateProfileDto } from './dto/auth.dto';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import * as qrcode from 'qrcode';
 import { OAuth2Client } from 'google-auth-library';
+import { MailService } from '../mail/mail.service';
+import * as crypto from 'crypto';
+import { UPSTASH_REDIS_CLIENT } from '../redis/redis.module';
+import { Redis } from '@upstash/redis';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private googleClient: OAuth2Client;
 
   constructor(
     @Inject(DRIZZLE_PROVIDER) private db: any,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private mailService: MailService,
+    @Inject(UPSTASH_REDIS_CLIENT) private redis: Redis,
   ) {
     this.googleClient = new OAuth2Client(this.configService.get<string>('GOOGLE_CLIENT_ID'));
   }
@@ -37,7 +44,7 @@ export class AuthService {
     .limit(1);
 
     if (!user) {
-      console.error(`[AuthService] Profile lookup failed: User ${userId} not found in DB`);
+      this.logger.error(`Profile lookup failed: User ${userId} not found in DB`);
       throw new UnauthorizedException('User not found');
     }
 
@@ -67,14 +74,33 @@ export class AuthService {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString('hex');
     const [newUser] = await this.db.insert(users).values({
       email,
       password: hashedPassword,
       fullName,
       role: 'USER',
+      verificationToken,
     }).returning();
 
+    // Fire and forget email sending
+    this.mailService.sendVerificationEmail(email, verificationToken).catch(e => this.logger.error('Failed to send verification email', e));
+
     return this.generateToken(newUser);
+  }
+
+  async verifyEmail(token: string) {
+    const [user] = await this.db.select().from(users).where(eq(users.verificationToken, token)).limit(1);
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired verification token');
+    }
+
+    await this.db.update(users).set({
+      isVerified: true,
+      verificationToken: null,
+    }).where(eq(users.id, user.id));
+
+    return { message: 'Email verified successfully' };
   }
 
   async login(loginDto: LoginDto) {
@@ -108,7 +134,7 @@ export class AuthService {
         // Optional: specify audience if needed: audience: this.configService.get<string>('GOOGLE_CLIENT_ID'),
       });
     } catch (error) {
-      console.error('Google ID token verification failed:', error);
+      this.logger.error('Google ID token verification failed:', error);
       throw new UnauthorizedException('Invalid Google ID token');
     }
 
@@ -148,6 +174,10 @@ export class AuthService {
       }
     }
 
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('User account is suspended or banned');
+    }
+
     return this.generateToken(user);
   }
 
@@ -165,7 +195,7 @@ export class AuthService {
 
   async generateMfaSecret(userId: number, email: string) {
     const secret = generateSecret();
-    const otpauthUrl = generateURI({ issuer: 'CivicWatch', label: email, secret });
+    const otpauthUrl = generateURI({ issuer: 'Civic Eye', label: email, secret });
 
     await this.db.update(users).set({ mfaSecret: secret }).where(eq(users.id, userId));
 
@@ -224,13 +254,30 @@ export class AuthService {
     }
   }
 
+  async logout(token: string) {
+    try {
+      const decoded = this.jwtService.decode(token) as any;
+      if (decoded && decoded.jti && decoded.exp) {
+        const now = Math.floor(Date.now() / 1000);
+        const ttl = decoded.exp - now;
+        if (ttl > 0) {
+          await this.redis.setex(`denylist:${decoded.jti}`, ttl, 'revoked');
+        }
+      }
+    } catch (e) {
+      // Ignored
+    }
+    return { success: true };
+  }
+
   generateToken(user: any) {
     const payload = { 
       sub: user.id, 
       email: user.email, 
       role: user.role,
       cityId: user.cityId,
-      areaId: user.areaId
+      areaId: user.areaId,
+      jti: crypto.randomUUID(),
     };
     return {
       access_token: this.jwtService.sign(payload),
