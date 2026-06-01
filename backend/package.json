@@ -116,6 +116,12 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "transformIgnorePatterns": [
+      "/node_modules/(?!expo-server-sdk)/"
+    ],
+    "moduleNameMapper": {
+      "^expo-server-sdk$": "<rootDir>/__mocks__/expo-server-sdk.ts"
+    }
   }
 }

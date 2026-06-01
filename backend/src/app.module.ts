@@ -28,9 +28,14 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { WinstonModule } from 'nest-winston';
 import * as winston from 'winston';
 
+import { validate } from './env.validation';
+
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ 
+      isGlobal: true,
+      validate,
+    }),
     WinstonModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
